@@ -308,7 +308,7 @@ def _section(text: str, start: str, end: str) -> str:
 
 
 def test_readme_states_both_second_expiry_results() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "MCP_SERVER.md").read_text(encoding="utf-8")
     section = _flat(_section(readme, "## Authentication", "## Architecture"))
 
     assert "If the session expires again during the re-run" in section

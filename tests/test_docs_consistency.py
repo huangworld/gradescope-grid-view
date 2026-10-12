@@ -25,7 +25,7 @@ from gradescope_mcp.tools.grading_ops import (
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-README = ROOT / "README.md"
+README = ROOT / "MCP_SERVER.md"
 AGENT = ROOT / "AGENT.md"
 SKILL = ROOT / "skills" / "gradescope-assisted-grading" / "SKILL.md"
 ENV_EXAMPLE = ROOT / ".env.example"

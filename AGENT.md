@@ -443,7 +443,7 @@ npx @modelcontextprotocol/inspector uv run python -m gradescope_mcp
 
 ## Maintenance Rule
 
-When code changes alter capabilities, update `README.md`, this file,
+When code changes alter capabilities, update `MCP_SERVER.md`, this file,
 `skills/gradescope-assisted-grading/SKILL.md` and `DEVLOG.md` in the same
 change. `tests/test_docs_consistency.py` catches inventory and count drift,
 but not wording; check the prose against the code.
