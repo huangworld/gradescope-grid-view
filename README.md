@@ -1,5 +1,16 @@
 # Gradescope MCP Server
 
+> **This fork adds the Gradescope Grid Grader Chrome extension in [`extension/`](extension/).**
+> It shows every student's tagged pages for one question in a grid, with batch paging,
+> multiselect, open-in-tabs and batch rubric apply. See [`extension/README.md`](extension/README.md)
+> to install it.
+>
+> **The extension makes no LLM / AI calls and does not interpret student work.** It only talks to
+> `www.gradescope.com` with your own login, to load submission images and save the grades the human
+> grader chooses. It builds on this project's knowledge of Gradescope's internal endpoints but does
+> not run or call the MCP server below. The MCP server is a separate, optional component, unchanged
+> from upstream.
+
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server for
 [Gradescope](https://www.gradescope.com/) that exposes course management,
 grading, regrade review, statistics, and AI-assisted grading workflows to MCP
@@ -732,6 +743,10 @@ gradescope-mcp/
 ├── README.md
 ├── pyproject.toml
 ├── uv.lock
+├── extension/              # Chrome extension (no LLM calls), see extension/README.md
+│   ├── manifest.json
+│   ├── background.js
+│   └── content/
 ├── skills/
 │   └── gradescope-assisted-grading/
 │       └── SKILL.md
