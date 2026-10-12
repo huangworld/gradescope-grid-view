@@ -2,7 +2,7 @@
 name = "gradescope-mcp"
 version = "0.1.0"
 description = "MCP server for Gradescope course management, grading, regrades, statistics, and AI-assisted workflows"
-readme = "README.md"
+readme = "MCP_SERVER.md"
 requires-python = ">=3.10"
 dependencies = [
     "beautifulsoup4>=4.14.0",
