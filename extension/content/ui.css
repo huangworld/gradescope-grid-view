@@ -1,0 +1,161 @@
+/* Gradescope Grid Grader — all selectors prefixed gsg- */
+.gsg-fab {
+  position: fixed; top: 72px; right: 16px; z-index: 99990;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+html.gsg-active { overflow: hidden; }
+
+.gsg-root {
+  position: fixed; inset: 0; z-index: 99980;
+  background: #f4f5f7; color: #1f2328;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  overflow: auto;
+  --cell-w: 360px;
+}
+.gsg-toolbar {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px 12px; background: #fff; border-bottom: 1px solid #d0d7de;
+}
+.gsg-sep { width: 1px; height: 22px; background: #d0d7de; margin: 0 4px; }
+.gsg-lbl { color: #57606a; }
+.gsg-status { margin-left: auto; color: #57606a; white-space: nowrap; }
+.gsg-status.gsg-status-err { color: #a40e26; font-weight: 600; white-space: normal; }
+.gsg-actions { display: flex; gap: 6px; }
+
+.gsg-btn {
+  appearance: none; cursor: pointer; user-select: none;
+  background: #fff; color: #1f2328; border: 1px solid #d0d7de; border-radius: 6px;
+  padding: 4px 10px; font: inherit; line-height: 1.3;
+}
+.gsg-btn:hover { background: #f3f4f6; }
+.gsg-btn:disabled { opacity: .5; cursor: default; }
+.gsg-btn.gsg-mini { padding: 2px 7px; }
+.gsg-btn.gsg-primary { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+.gsg-btn.gsg-primary:hover { background: #1a5fd0; }
+.gsg-btn.gsg-on { background: #ddf4ff; border-color: #54aeff; }
+.gsg-close { font-weight: 600; }
+.gsg-select, .gsg-input { font: inherit; border: 1px solid #d0d7de; border-radius: 6px; padding: 4px 6px; background: #fff; }
+.gsg-root input[type=range] { width: 140px; }
+
+.gsg-menu { position: relative; }
+.gsg-menu summary { list-style: none; }
+.gsg-menu summary::-webkit-details-marker { display: none; }
+.gsg-menu-body {
+  position: absolute; right: 0; top: 110%; z-index: 3;
+  display: flex; flex-direction: column; gap: 4px; min-width: 240px;
+  background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.15);
+}
+.gsg-menu-body .gsg-btn { text-align: left; }
+
+.gsg-grid {
+  display: grid; gap: 12px; padding: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--cell-w), 1fr));
+}
+.gsg-cell {
+  display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #d0d7de; border-left: 4px solid #d0d7de; border-radius: 8px;
+  overflow: hidden;
+}
+.gsg-cell.gsg-graded   { border-left-color: #2da44e; }
+.gsg-cell.gsg-ungraded { border-left-color: #d0d7de; }
+.gsg-cell.gsg-unknown  { border-left-color: #d0d7de; }
+.gsg-cell.gsg-selected { border-color: #54aeff; box-shadow: 0 0 0 2px #54aeff; }
+.gsg-cell.gsg-busy .gsg-body::after {
+  content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.55);
+}
+.gsg-cell[hidden] { display: none; }
+
+.gsg-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-bottom: 1px solid #eaeef2; min-height: 30px;
+}
+/* custom tick: Gradescope's global CSS hides native checkboxes */
+.gsg-tick {
+  flex: none; width: 20px; height: 20px; box-sizing: border-box; cursor: pointer;
+  border: 2px solid #8c959f; border-radius: 5px; background: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 14px; font-weight: 700; line-height: 1;
+}
+.gsg-tick:hover { border-color: #1f6feb; }
+.gsg-tick.gsg-on, .gsg-chosen > .gsg-tick { background: #0969da; border-color: #0969da; }
+.gsg-tick.gsg-on::after, .gsg-chosen > .gsg-tick::after { content: "✓"; }
+.gsg-cell.gsg-selected .gsg-head { background: #ddf4ff; }
+.gsg-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #0969da; text-decoration: none; font-weight: 600;
+}
+.gsg-name:hover { text-decoration: underline; }
+.gsg-badge {
+  flex: none; font-size: 12px; padding: 1px 7px; border-radius: 999px;
+  background: #eaeef2; color: #57606a; font-variant-numeric: tabular-nums;
+}
+.gsg-graded .gsg-badge { background: #dafbe1; color: #116329; font-weight: 600; }
+
+.gsg-body {
+  position: relative; cursor: pointer; user-select: none; background: #e9ecef;
+  min-height: 120px; display: flex; align-items: flex-start; justify-content: center;
+}
+.gsg-img { display: block; width: 100%; height: auto; }
+.gsg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.gsg-overlay[hidden] { display: none; }
+.gsg-crop { position: absolute; border: 1.5px solid rgba(9,105,218,.6); border-radius: 2px; }
+.gsg-crop-dim { box-shadow: 0 0 0 9999px rgba(0,0,0,.15); }
+.gsg-msg {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #57606a; padding: 12px; text-align: center;
+}
+.gsg-msg[hidden] { display: none; }
+
+.gsg-foot {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 5px 8px; border-top: 1px solid #eaeef2; color: #57606a; font-variant-numeric: tabular-nums;
+}
+.gsg-pagelbl { min-width: 60px; text-align: center; }
+
+/* batch grading panel */
+.gsg-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; z-index: 99985;
+  background: #fff; border-left: 1px solid #d0d7de; box-shadow: -8px 0 24px rgba(0,0,0,.12);
+  padding: 14px; overflow: auto; display: flex; flex-direction: column; gap: 10px;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #1f2328;
+}
+.gsg-panel[hidden] { display: none; }
+.gsg-panel-head { display: flex; align-items: center; justify-content: space-between; }
+.gsg-panel-title { margin: 0; font-size: 16px; }
+.gsg-hint { color: #57606a; font-size: 12px; }
+.gsg-rubric-list { display: flex; flex-direction: column; gap: 4px; }
+.gsg-rubric-item {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px;
+  border: 2px solid #d0d7de; border-radius: 8px; cursor: pointer; user-select: none;
+  transition: background .1s, border-color .1s;
+}
+.gsg-rubric-item:hover { background: #f6f8fa; border-color: #8c959f; }
+.gsg-rubric-item:focus-visible { outline: 2px solid #1f6feb; outline-offset: 2px; }
+.gsg-rubric-item.gsg-chosen { background: #ddf4ff; border-color: #54aeff; }
+.gsg-rubric-item.gsg-chosen .gsg-rubric-desc { font-weight: 600; color: #0a3069; }
+.gsg-rubric-key {
+  flex: none; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: #57606a;
+  background: #f6f8fa; border: 1px solid #d0d7de; border-bottom-width: 2px; border-radius: 4px;
+}
+.gsg-chosen .gsg-rubric-key { background: #fff; }
+.gsg-rubric-desc { flex: 1; }
+.gsg-rubric-w { color: #57606a; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gsg-field { display: flex; flex-direction: column; gap: 3px; }
+.gsg-field > span { color: #57606a; font-size: 12px; }
+.gsg-textarea { resize: vertical; }
+.gsg-projected {
+  padding: 10px 12px; border-radius: 8px; background: #dafbe1; border-left: 4px solid #2da44e;
+}
+.gsg-projected.gsg-projected-empty { background: #f6f8fa; border-left-color: #afb8c1; }
+.gsg-projected-score { font-size: 22px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.gsg-projected-total { font-size: 14px; font-weight: 500; color: #57606a; }
+.gsg-projected-sub { color: #57606a; font-size: 12px; margin-top: 2px; }
+.gsg-panel-actions .gsg-primary { width: 100%; padding: 10px; font-size: 15px; font-weight: 600; }
+.gsg-panel-actions { display: flex; gap: 8px; }
+.gsg-results { display: flex; flex-direction: column; gap: 3px; }
+.gsg-ok { color: #116329; }
+.gsg-err { color: #a40e26; }

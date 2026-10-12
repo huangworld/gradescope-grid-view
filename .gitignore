@@ -33,3 +33,7 @@ Thumbs.db
 # Local log of real-account write tests (contains sensitive data; never
 # committed)
 OPERATIONS_LOGS/
+
+# Chrome extension build artifacts
+*.zip
+node_modules/
