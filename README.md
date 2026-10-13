@@ -75,16 +75,21 @@ sent to any other server.
 
 ## How it uses gradescope-mcp
 
-This repo is a fork of [Yuanpeng-Li/gradescope-mcp](https://github.com/Yuanpeng-Li/gradescope-mcp)
-(MIT). Gradescope has no public API; that project had already worked out its internal endpoints
-and payloads. The extension reuses that knowledge only:
+[Yuanpeng-Li/gradescope-mcp](https://github.com/Yuanpeng-Li/gradescope-mcp) (MIT) is a Python
+MCP server for Gradescope. Gradescope has no public API; that project had already worked out its
+internal endpoints and payloads. The extension reuses that knowledge only:
 
 - where a submission's grade page lives and how its data (pages, rubric, score) is embedded
 - how the `save_grade` request is shaped
 
 The extension does **not** run, import or call the MCP server, and needs no Python or MCP client.
-The upstream server code is still in this repo (`src/`, `tests/`), unchanged and optional; its docs
-are in [`MCP_SERVER.md`](MCP_SERVER.md).
+The upstream project is included as a git submodule at `gradescope-mcp/`, pinned to the version the
+endpoint details came from, for reference only. A plain clone leaves it empty, which is fine for
+using the extension. To fetch it:
+
+```sh
+git submodule update --init
+```
 
 ## Troubleshooting
 
@@ -109,12 +114,11 @@ are in [`MCP_SERVER.md`](MCP_SERVER.md).
 ## Repo layout
 
 ```text
-extension/      Chrome extension (manifest.json, background.js, content/)
-MCP_SERVER.md   docs for the upstream MCP server (optional, not used by the extension)
-src/, tests/    upstream MCP server code (unchanged)
+extension/        Chrome extension (manifest.json, background.js, content/)
+gradescope-mcp/   upstream MCP server, git submodule (reference only, not used by the extension)
 ```
 
 ## License
 
-MIT. The extension is © Zhicheng Huang (`extension/LICENSE`); the upstream MCP server is
-© Yuanpeng Li (`LICENSE`).
+MIT © Zhicheng Huang (`LICENSE`). The `gradescope-mcp` submodule is MIT © Yuanpeng Li, under
+its own license.

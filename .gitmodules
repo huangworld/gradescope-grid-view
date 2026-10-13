@@ -1,0 +1,3 @@
+[submodule "gradescope-mcp"]
+	path = gradescope-mcp
+	url = https://github.com/Yuanpeng-Li/gradescope-mcp.git
