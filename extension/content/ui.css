@@ -148,9 +148,9 @@ html.gsg-active { overflow: hidden; }
 .gsg-field > span { color: #57606a; font-size: 12px; }
 .gsg-textarea { resize: vertical; }
 .gsg-projected {
-  padding: 10px 12px; border-radius: 8px; background: #dafbe1; border-left: 4px solid #2da44e;
+  padding: 10px 12px; border-radius: 8px; background: #dafbe1; border: 1px solid #4ac26b;
 }
-.gsg-projected.gsg-projected-empty { background: #f6f8fa; border-left-color: #afb8c1; }
+.gsg-projected.gsg-projected-empty { background: #f6f8fa; border-color: #d0d7de; }
 .gsg-projected-score { font-size: 22px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .gsg-projected-total { font-size: 14px; font-weight: 500; color: #57606a; }
 .gsg-projected-sub { color: #57606a; font-size: 12px; margin-top: 2px; }
