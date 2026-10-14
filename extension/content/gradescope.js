@@ -79,10 +79,47 @@ function normalize(props, csrf, gradeUrl) {
     rubricItems,
     checked,
     evaluation: props.evaluation || {},
+    answerText: answerText(props),
     score,
     graded,
     fetchedAt: Date.now(),
   };
+}
+
+// Typed answers of online assignments, if the grade page carries them. The
+// exact prop is unknown (the MCP server reads them from a different React
+// component), so try the obvious keys first, then walk for answer-like keys.
+// Answers look like {"0": "text"} or {"0": [{text_file_id}]} (file refs skipped).
+export function answerText(props) {
+  const parts = [];
+  const seen = new Set();
+  const push = (s) => {
+    const t = s.trim();
+    if (t && !/^https?:\/\//.test(t) && !seen.has(t)) (seen.add(t), parts.push(t));
+  };
+  const collect = (v, depth = 0) => {
+    if (v == null || depth > 6) return;
+    if (typeof v === "string") push(v);
+    else if (typeof v === "number" || typeof v === "boolean") push(String(v));
+    else if (Array.isArray(v)) for (const x of v) collect(x, depth + 1);
+    else if (typeof v === "object" && !("text_file_id" in v)) for (const x of Object.values(v)) collect(x, depth + 1);
+  };
+  const qs = props.question_submission || {};
+  for (const d of [qs.answers, qs.answer, props.answers, props.submission?.answers, props.submission?.answer]) collect(d);
+  if (parts.length) return parts.join("\n");
+
+  const SKIP_TOP = new Set(["question", "rubric_items", "pages", "urls", "evaluation", "rubric_item_evaluations", "crop_rects"]);
+  const visit = (obj, depth) => {
+    if (!obj || typeof obj !== "object" || depth > 4) return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (depth === 0 && SKIP_TOP.has(k)) continue;
+      if (/url|path|_id$|^id$|type|class|csrf|token|name|email/i.test(k)) continue;
+      if (/answer|response|latex|code|^text$|content/i.test(k)) collect(v);
+      else if (v && typeof v === "object") visit(v, depth + 1);
+    }
+  };
+  visit(props, 0);
+  return parts.join("\n");
 }
 
 // Heuristic: find which of allPages are the student's tagged pages for this

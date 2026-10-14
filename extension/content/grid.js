@@ -1,5 +1,18 @@
-// Grid view: cells, paging, sizing, filtering, selection, graded markers.
+// Grid view: cells, paging, sizing, filtering, selection, graded markers, find.
 import { fetchGradeCtx, makeLimiter } from "./gradescope.js";
+import { parseQuery } from "./query.js";
+import { ocrJobsFor, jobForPage, combineText, pageHits } from "./text.js";
+import { ocrPage, ocrWarm, ocrShutdown, friendlyOcrError, loadIndex, saveIndex } from "./ocr.js";
+
+const FIND_HELP = [
+  "Find: filter cells whose text matches.",
+  "  foo bar          both words (implicit AND)",
+  "  foo OR bar       either          NOT foo / -foo   exclude",
+  '  "a phrase"       exact phrase    /re+gex/i        regex',
+  "  ( ... )          grouping;  NOT > AND > OR",
+  "Text = typed answers (online assignments) + OCR of the pages shown (OCR: on).",
+  "OCR reads printed/typed text only; handwriting is mostly missed.",
+].join("\n");
 
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -32,9 +45,20 @@ export function createGrid({ rows, onClose }) {
     showAll: false,
     crop: true,
     retried: new Set(),
+    query: "",
+    pred: null, // compiled find predicate, or null = no find filter
+    matchers: null, // range matchers of the query's positive terms (for highlights)
+    ocrOn: false,
+    ocr: new Map(), // ocr job key → {text, words} | {err}
   };
+  const hitCache = new Map(); // ocr key → boxes for the current query
   const limiter = makeLimiter(5);
   const cells = new Map();
+  let ocrErrShown = false;
+  let findTimer = null;
+  let indexing = null; // { cancelled: bool } while "Index pages" runs
+  let saveTimer = null;
+  const qid = rows[0]?.gradeUrl?.match(/\/questions\/(\d+)\//)?.[1] || null;
 
   // ---------- toolbar ----------
   const status = h("span", { class: "gsg-status" });
@@ -63,6 +87,35 @@ export function createGrid({ rows, onClose }) {
     h("option", { value: "name", text: "Sort: name" }),
     h("option", { value: "score", text: "Sort: score" })
   );
+  const findBox = h("input", {
+    type: "search",
+    class: "gsg-select gsg-find",
+    placeholder: "find: foo AND (bar OR /re/i) NOT baz",
+    title: FIND_HELP,
+    spellcheck: "false",
+    autocomplete: "off",
+    oninput: (e) => {
+      clearTimeout(findTimer);
+      findTimer = setTimeout(() => setQuery(e.target.value), 250);
+    },
+    onkeydown: (e) => {
+      if (e.key === "Enter") (clearTimeout(findTimer), setQuery(e.target.value));
+      else if (e.key === "Escape") {
+        e.stopPropagation();
+        if (e.target.value) (e.target.value = "", setQuery(""));
+        else e.target.blur();
+      }
+    },
+  });
+  const ocrBtn = h("button", { class: "gsg-btn", title: "OCR the pages shown so find can match their printed/typed text (runs locally; handwriting mostly missed)", onclick: () => setOcrOn(!state.ocrOn) });
+  const indexBtn = h("button", {
+    class: "gsg-btn",
+    title: "Load every submission and OCR every page shown (current Pages/Crop setting) so find is instant afterwards. The index is kept per question in extension storage.",
+    onclick: () => indexAll(),
+  });
+  const progBar = h("progress", { class: "gsg-progress-bar", max: 1, value: 0 });
+  const progLbl = h("span", { class: "gsg-progress-lbl" });
+  const progress = h("span", { class: "gsg-progress", hidden: "" }, progBar, progLbl);
   const menu = h(
     "details",
     { class: "gsg-menu" },
@@ -91,6 +144,11 @@ export function createGrid({ rows, onClose }) {
     cropBtn,
     filterSel,
     sortSel,
+    h("span", { class: "gsg-sep" }),
+    findBox,
+    ocrBtn,
+    indexBtn,
+    progress,
     h("span", { class: "gsg-sep" }),
     h("button", { class: "gsg-btn", text: "Clear selection", onclick: () => clearSelection() }),
     actions,
@@ -172,10 +230,156 @@ export function createGrid({ rows, onClose }) {
       throw e;
     } finally {
       state.loading.delete(sid);
+      queueOcr(sid);
       renderCell(sid);
       renderStatus();
       applyFilter();
     }
+  }
+
+  // ---------- find ----------
+  function jobsFor(sid) {
+    const ctx = state.ctx.get(sid);
+    return ctx ? ocrJobsFor(sid, pagesOf(sid), ctx.cropRects, state.crop) : [];
+  }
+  function textOf(sid) {
+    return combineText({ ctx: state.ctx.get(sid), jobs: jobsFor(sid), ocrOn: state.ocrOn, ocr: state.ocr });
+  }
+  // true = show. Cells whose text isn't known yet stay visible (dimmed) rather than flicker.
+  function matchesFind(sid) {
+    if (!state.pred) return true;
+    const { text, status } = textOf(sid);
+    return status !== "ready" || state.pred(text);
+  }
+  function setQuery(q) {
+    state.query = q;
+    let parsed;
+    try {
+      parsed = parseQuery(q);
+    } catch (e) {
+      findBox.classList.add("gsg-bad");
+      findBox.title = `${e.message}${Number.isFinite(e.pos) ? ` (at ${e.pos + 1})` : ""}\n\n${FIND_HELP}`;
+      setStatus(`find: ${e.message}`, true);
+      return; // keep last good predicate
+    }
+    findBox.classList.remove("gsg-bad");
+    findBox.title = FIND_HELP;
+    state.pred = parsed?.pred || null;
+    state.matchers = parsed?.highlight || null;
+    hitCache.clear();
+    if (state.pred) {
+      if (state.ctx.size + state.errors.size < state.rows.length) loadAll().catch(() => {});
+      if (state.ocrOn) queueOcr();
+    }
+    renderAll();
+  }
+  function setOcrOn(v) {
+    state.ocrOn = v;
+    persist();
+    if (v) {
+      ocrErrShown = false;
+      ocrWarm().catch((e) => reportOcrError(e));
+      if (state.pred) queueOcr();
+    }
+    renderAll();
+  }
+  function reportOcrError(e) {
+    console.warn("[gsg] OCR", e);
+    if (ocrErrShown) return;
+    ocrErrShown = true;
+    setStatus(`OCR: ${friendlyOcrError(e)}`, true);
+  }
+  // Run one OCR job and record the result. Resolves (never rejects) when done.
+  function runOcrJob(job, opts) {
+    return ocrPage(job, opts)
+      .then(
+        (res) => (state.ocr.set(job.key, res), hitCache.delete(job.key), scheduleSave()),
+        (e) => {
+          if (e?.cancelled) return;
+          state.ocr.set(job.key, { err: e.message || String(e) });
+          reportOcrError(e);
+        }
+      )
+      .finally(() => {
+        if (!root.isConnected) return;
+        renderCell(job.sid);
+        applyFilter();
+        renderStatus();
+      });
+  }
+  // Queue OCR for every page job not yet done (one sid, or all loaded cells).
+  function queueOcr(onlySid) {
+    if (!state.ocrOn || !state.pred) return;
+    const sids = onlySid ? [onlySid] : [...state.ctx.keys()];
+    for (const sid of sids) for (const job of jobsFor(sid)) if (!state.ocr.has(job.key)) runOcrJob(job);
+  }
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveIndex(qid, state.ocr), 1500);
+  }
+
+  // ---------- index ----------
+  function setProgress(done, total, what) {
+    progress.hidden = false;
+    progBar.max = Math.max(1, total);
+    progBar.value = done;
+    progLbl.textContent = `${what} ${done}/${total}`;
+  }
+  function indexedCount() {
+    let done = 0, total = 0;
+    for (const sid of state.ctx.keys()) for (const j of jobsFor(sid)) (total++, state.ocr.has(j.key) && done++);
+    return { done, total, allLoaded: state.ctx.size + state.errors.size >= state.rows.length };
+  }
+  async function indexAll() {
+    if (indexing) {
+      indexing.cancelled = true;
+      progLbl.textContent = "cancelling…";
+      return;
+    }
+    const run = (indexing = { cancelled: false });
+    const t0 = Date.now();
+    if (!state.ocrOn) setOcrOn(true);
+    else ocrWarm().catch((e) => reportOcrError(e));
+    renderAll();
+    try {
+      // phase 1: every submission's grade page (gives pages + typed answers)
+      const todo = state.rows.filter((r) => !state.ctx.has(r.sid));
+      let loaded = state.rows.length - todo.length;
+      setProgress(loaded, state.rows.length, "loading submissions");
+      await Promise.allSettled(
+        todo.map((r) =>
+          ensureCtx(r.sid)
+            .catch(() => {})
+            .finally(() => setProgress(++loaded, state.rows.length, "loading submissions"))
+        )
+      );
+      if (run.cancelled) return;
+      // phase 2: OCR every page not yet indexed
+      const jobs = [];
+      for (const sid of state.ctx.keys()) for (const j of jobsFor(sid)) if (!state.ocr.has(j.key)) jobs.push(j);
+      const total = indexedCount().total;
+      let done = total - jobs.length;
+      setProgress(done, total, "indexing pages");
+      await Promise.all(jobs.map((j) => runOcrJob(j, { cancelled: () => run.cancelled }).then(() => !run.cancelled && setProgress(++done, total, "indexing pages"))));
+    } finally {
+      indexing = null;
+      progress.hidden = true;
+      const { done, total } = indexedCount();
+      const secs = Math.round((Date.now() - t0) / 1000);
+      saveIndex(qid, state.ocr);
+      renderAll();
+      setStatus(run.cancelled ? `Index cancelled: ${done}/${total} pages indexed` : `Indexed ${done}/${total} pages in ${secs}s`);
+    }
+  }
+  function findStats() {
+    let match = 0, evaluated = 0, pending = 0, ocrDone = 0, ocrTotal = 0;
+    for (const r of state.rows) {
+      const { text, status } = textOf(r.sid);
+      if (status === "ready") (evaluated++, state.pred(text) && match++);
+      else pending++;
+      if (state.ocrOn) for (const j of jobsFor(r.sid)) (ocrTotal++, state.ocr.has(j.key) && ocrDone++);
+    }
+    return { match, evaluated, pending, ocrDone, ocrTotal };
   }
   function waitFor(sid) {
     return new Promise((resolve, reject) => {
@@ -214,6 +418,7 @@ export function createGrid({ rows, onClose }) {
     c.el.classList.toggle("gsg-unknown", graded == null);
     c.el.classList.toggle("gsg-selected", state.selected.has(sid));
     c.el.classList.toggle("gsg-busy", state.loading.has(sid));
+    c.el.classList.toggle("gsg-pending", !!state.pred && textOf(sid).status !== "ready");
     c.check.classList.toggle("gsg-on", state.selected.has(sid));
     c.check.setAttribute("aria-checked", String(state.selected.has(sid)));
     const score = scoreOf(sid);
@@ -253,7 +458,6 @@ export function createGrid({ rows, onClose }) {
   function renderOverlay(c, ctx, page) {
     const rects = state.crop ? ctx.cropRects.filter((r) => String(r.page_number ?? r.page) === String(page.number)) : [];
     c.overlay.replaceChildren();
-    c.overlay.hidden = !rects.length;
     rects.forEach((r, i) => {
       const box = h("div", { class: rects.length === 1 ? "gsg-crop gsg-crop-dim" : "gsg-crop" });
       box.style.left = `${r.x1}%`;
@@ -262,12 +466,33 @@ export function createGrid({ rows, onClose }) {
       box.style.height = `${r.y2 - r.y1}%`;
       c.overlay.append(box);
     });
+    const hits = hitsFor(c.el.dataset.sid, ctx, page);
+    const PAD = 0.3; // % — a little air around the word
+    for (const b of hits) {
+      const box = h("div", { class: "gsg-hit" });
+      box.style.left = `${b.x - PAD}%`;
+      box.style.top = `${b.y - PAD}%`;
+      box.style.width = `${b.w + 2 * PAD}%`;
+      box.style.height = `${b.h + 2 * PAD}%`;
+      c.overlay.append(box);
+    }
+    c.overlay.hidden = !rects.length && !hits.length;
+  }
+  // Word boxes on this page matching the query's positive terms (cached per OCR key + query).
+  function hitsFor(sid, ctx, page) {
+    if (!state.matchers || !state.ocrOn) return [];
+    const { key } = jobForPage(sid, page, ctx.cropRects, state.crop);
+    if (hitCache.has(key)) return hitCache.get(key);
+    const hits = pageHits(state.ocr.get(key), state.matchers);
+    hitCache.set(key, hits);
+    return hits;
   }
 
   function visibleOrdered() {
     const list = state.rows.filter((r) => {
       const g = isGraded(r.sid);
-      return state.filter === "all" || (state.filter === "graded" ? g === true : g !== true);
+      const byGrade = state.filter === "all" || (state.filter === "graded" ? g === true : g !== true);
+      return byGrade && matchesFind(r.sid);
     });
     const num = (s) => (s == null || s === "" ? -Infinity : parseFloat(s));
     list.sort((a, b) =>
@@ -289,7 +514,14 @@ export function createGrid({ rows, onClose }) {
     const loaded = state.ctx.size;
     const graded = state.rows.filter((r) => isGraded(r.sid) === true).length;
     const errs = state.errors.size;
-    status.textContent = `loaded ${loaded}/${n}${errs ? ` (${errs} failed)` : ""} · graded ${graded}/${n} · ${state.selected.size} selected`;
+    let s = `loaded ${loaded}/${n}${errs ? ` (${errs} failed)` : ""} · graded ${graded}/${n} · ${state.selected.size} selected`;
+    if (state.pred) {
+      const f = findStats();
+      s += ` · find ${f.match}/${f.evaluated}${f.pending ? ` (${f.pending} pending)` : ""}`;
+      if (state.ocrOn) s += ` · OCR ${f.ocrDone}/${f.ocrTotal}`;
+    }
+    status.textContent = s;
+    renderIndexBtn();
     console.debug("[gsg] selected:", [...state.selected]);
     actions.dispatchEvent(new CustomEvent("gsg:selection", { detail: { count: state.selected.size } }));
   }
@@ -308,9 +540,24 @@ export function createGrid({ rows, onClose }) {
     pagesSwitch.textContent = state.showAll ? "Pages: all" : "Pages: tagged";
     cropBtn.textContent = state.crop ? "Crop: on" : "Crop: off";
     cropBtn.classList.toggle("gsg-on", state.crop);
+    ocrBtn.textContent = state.ocrOn ? "OCR: on" : "OCR: off";
+    ocrBtn.classList.toggle("gsg-on", state.ocrOn);
+    if (findBox.value !== state.query) findBox.value = state.query;
     filterSel.value = state.filter;
     sortSel.value = state.sort;
     slider.value = state.cellW;
+  }
+  // Index button reflects loaded ctx + OCR cache, both of which change outside renderAll.
+  function renderIndexBtn() {
+    const ix = indexedCount();
+    const complete = ix.allLoaded && ix.total > 0 && ix.done === ix.total;
+    indexBtn.textContent = indexing ? "✕ Cancel index" : complete ? `Indexed ✓ ${ix.total}` : ix.done ? `Index pages (${ix.done}/${ix.total})` : "Index pages";
+    indexBtn.classList.toggle("gsg-on", complete && !indexing);
+    indexBtn.title = indexing
+      ? "Stop indexing (pages already done are kept)"
+      : complete
+        ? "Every page shown is OCR'd; find is instant. Changing Pages/Crop needs a re-index."
+        : "Load every submission and OCR every page shown (current Pages/Crop setting) so find is instant afterwards. The index is kept per question in extension storage.";
   }
 
   // ---------- interactions ----------
@@ -367,11 +614,13 @@ export function createGrid({ rows, onClose }) {
   function setShowAll(v) {
     state.showAll = v;
     persist();
+    queueOcr(); // page set changed → new OCR keys
     renderAll();
   }
   function setCrop(v) {
     state.crop = v;
     persist();
+    queueOcr(); // crop region is part of the OCR key
     renderAll();
   }
   function setFilter(v) {
@@ -384,22 +633,30 @@ export function createGrid({ rows, onClose }) {
   }
   function persist() {
     try {
-      chrome.storage.sync.set({ cellW: state.cellW, showAll: state.showAll, crop: state.crop });
+      chrome.storage.sync.set({ cellW: state.cellW, showAll: state.showAll, crop: state.crop, ocrOn: state.ocrOn });
     } catch {}
   }
   async function restore() {
     try {
-      const v = await chrome.storage.sync.get(["cellW", "showAll", "crop"]);
+      const v = await chrome.storage.sync.get(["cellW", "showAll", "crop", "ocrOn"]);
       if (v.cellW) state.cellW = v.cellW;
       if (typeof v.showAll === "boolean") state.showAll = v.showAll;
       if (typeof v.crop === "boolean") state.crop = v.crop;
+      if (typeof v.ocrOn === "boolean") state.ocrOn = v.ocrOn;
     } catch {}
+    for (const [k, v] of await loadIndex(qid)) if (!state.ocr.has(k)) state.ocr.set(k, v);
     root.style.setProperty("--cell-w", `${state.cellW}px`);
     renderAll();
   }
 
   function onKey(e) {
     if (!root.isConnected) return;
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      findBox.focus();
+      findBox.select();
+      return;
+    }
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
     if (e.key === "ArrowLeft") (e.preventDefault(), shiftAll(-1));
@@ -429,8 +686,13 @@ export function createGrid({ rows, onClose }) {
     },
     destroy() {
       document.removeEventListener("keydown", onKey);
+      clearTimeout(findTimer);
+      clearTimeout(saveTimer);
+      if (indexing) indexing.cancelled = true;
+      saveIndex(qid, state.ocr);
       io.disconnect();
       root.remove();
+      ocrShutdown(); // frees the OCR workers' memory
     },
   };
 }
