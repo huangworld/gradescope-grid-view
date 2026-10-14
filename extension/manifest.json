@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Gradescope Grid Grader",
-  "version": "0.1.0",
-  "description": "Grid view of every student's tagged pages for one question. Batch paging, resizable cells, multiselect, open in tabs, batch rubric apply.",
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["https://www.gradescope.com/*"],
+  "version": "0.2.0",
+  "description": "Grid view of every student's tagged pages for one question. Batch paging, resizable cells, multiselect, open in tabs, batch rubric apply, find (typed answers + local OCR).",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "unlimitedStorage", "tabs", "offscreen"],
+  "host_permissions": ["https://www.gradescope.com/*", "https://*.amazonaws.com/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {

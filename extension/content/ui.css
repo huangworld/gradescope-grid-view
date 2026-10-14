@@ -37,6 +37,11 @@ html.gsg-active { overflow: hidden; }
 .gsg-close { font-weight: 600; }
 .gsg-select, .gsg-input { font: inherit; border: 1px solid #d0d7de; border-radius: 6px; padding: 4px 6px; background: #fff; }
 .gsg-root input[type=range] { width: 140px; }
+.gsg-find { width: 26ch; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.gsg-find.gsg-bad { border-color: #cf222e; box-shadow: 0 0 0 2px rgba(207,34,46,.25); }
+.gsg-progress { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #57606a; }
+.gsg-progress[hidden] { display: none; }
+.gsg-progress-bar { width: 140px; height: 10px; accent-color: #1f6feb; }
 
 .gsg-menu { position: relative; }
 .gsg-menu summary { list-style: none; }
@@ -65,6 +70,7 @@ html.gsg-active { overflow: hidden; }
 .gsg-cell.gsg-busy .gsg-body::after {
   content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.55);
 }
+.gsg-cell.gsg-pending { opacity: .55; }
 .gsg-cell[hidden] { display: none; }
 
 .gsg-head {
@@ -102,6 +108,7 @@ html.gsg-active { overflow: hidden; }
 .gsg-overlay[hidden] { display: none; }
 .gsg-crop { position: absolute; border: 1.5px solid rgba(9,105,218,.6); border-radius: 2px; }
 .gsg-crop-dim { box-shadow: 0 0 0 9999px rgba(0,0,0,.15); }
+.gsg-hit { position: absolute; background: rgba(255,212,0,.35); outline: 1.5px solid rgba(191,135,0,.85); border-radius: 2px; }
 .gsg-msg {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: #57606a; padding: 12px; text-align: center;
