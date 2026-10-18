@@ -28,7 +28,8 @@ function absolute(url) {
 }
 
 export async function fetchGradeCtx(gradeUrl) {
-  const res = await fetch(gradeUrl, { credentials: "same-origin", headers: { Accept: "text/html" } });
+  // no-store: after a save we refetch to show the new grade; a cached copy would show the old one
+  const res = await fetch(gradeUrl, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/html" } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   if (/\/login\b/.test(new URL(res.url).pathname)) throw new Error("Not logged in");
   const html = await res.text();

@@ -50,6 +50,7 @@ export function createGrid({ rows, onClose }) {
     matchers: null, // range matchers of the query's positive terms (for highlights)
     ocrOn: false,
     ocr: new Map(), // ocr job key → {text, words} | {err}
+    saved: new Map(), // sid → score we saved from the grade panel; wins over a stale refetch
   };
   const hitCache = new Map(); // ocr key → boxes for the current query
   const limiter = makeLimiter(5);
@@ -222,6 +223,11 @@ export function createGrid({ rows, onClose }) {
     renderCell(sid);
     try {
       const ctx = await limiter(() => fetchGradeCtx(state.byId.get(sid).gradeUrl));
+      if (state.saved.has(sid)) {
+        // we graded this one ourselves; the grade page's graded flag / score may lag the save
+        ctx.graded = true;
+        if (ctx.score == null) ctx.score = state.saved.get(sid);
+      }
       state.ctx.set(sid, ctx);
       if (!state.pageIdx.has(sid)) state.pageIdx.set(sid, 0);
       return ctx;
@@ -684,6 +690,21 @@ export function createGrid({ rows, onClose }) {
     anyCtx: () => state.ctx.values().next().value || null,
     setBusy(sid, on) {
       cells.get(sid)?.el.classList.toggle("gsg-busy", on);
+    },
+    // Optimistic update right after save_grade: ungraded → graded + score chip now, refetch later confirms.
+    markGraded(sid, { score, checked }) {
+      state.saved.set(sid, score ?? null);
+      const row = state.byId.get(sid);
+      if (row) (row.graded = true), (row.score = score ?? row.score);
+      const ctx = state.ctx.get(sid);
+      if (ctx) {
+        ctx.graded = true;
+        if (score != null) ctx.score = score;
+        if (checked) ctx.checked = new Set([...checked].map(String));
+      }
+      renderCell(sid);
+      renderStatus();
+      applyFilter();
     },
     destroy() {
       document.removeEventListener("keydown", onKey);

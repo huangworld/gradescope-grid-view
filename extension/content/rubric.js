@@ -155,8 +155,11 @@ export function createRubricPanel({ grid }) {
           grid.setBusy(sid, true);
           try {
             const ctx = await grid.ensureCtx(sid);
-            await saveGrade(ctx, payload);
-            await grid.ensureCtx(sid, { force: true }); // refresh marker + score
+            const saved = await saveGrade(ctx, payload);
+            // chip flips to "✓ score" immediately; prefer the server's score, else our projection
+            const score = typeof saved?.score === "number" ? saved.score : projectScore(ctx, chosen, payload.points ?? ctx.evaluation.points);
+            grid.markGraded(sid, { score, checked: chosen });
+            await grid.ensureCtx(sid, { force: true }); // confirm from a fresh grade page
           } catch (e) {
             fails.push({ sid, err: e.message || String(e) });
           } finally {
