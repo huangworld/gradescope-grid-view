@@ -280,6 +280,13 @@ try {
   const re2 = await cdp.eval(pg, `JSON.stringify([__vis(), __pending().length, __status()])`);
   check("find instant after reopen (no pending)", re2.startsWith('[["102"],0,'), re2);
   check("highlights restored from persisted index", (await cdp.eval(pg, `__hits("102")`)) === 1);
+  // Select all = exactly the visible cells (find active → only 102)
+  const selAll = await cdp.eval(pg, `(() => {
+    [...document.querySelectorAll(".gsg-btn")].find(b => b.textContent === "Select all").click();
+    return JSON.stringify(__grid.getSelected());
+  })()`);
+  check("Select all picks only visible cells", selAll === '["102"]', selAll);
+  await cdp.eval(pg, `__grid.clearSelection()`);
 
   // markGraded flips chip + "Sort: recently graded" orders newest first, then ungraded by name
   const recent = await cdp.eval(pg, `(async () => {

@@ -212,6 +212,12 @@ export function projectScore(ctx, checkedIds, pointAdj) {
   return score;
 }
 
+// Blank the comment only: re-sends the rubric items currently checked and keeps the point
+// adjustment, so the score is unchanged. Caller must pass a FRESH ctx (checked/points may be stale).
+export function clearComment(ctx) {
+  return saveGrade(ctx, { checkedIds: ctx.checked, points: undefined, comments: "" });
+}
+
 // Replace semantics: every rubric id is sent, chosen ones "true", rest "false".
 // points/comments undefined → keep the submission's existing values.
 export async function saveGrade(ctx, { checkedIds, points, comments }) {
