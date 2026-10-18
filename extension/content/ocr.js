@@ -59,6 +59,25 @@ export const ocrInflight = () => inflight.size;
 // ocr job keys (sid|page|crop). Older entries may be plain strings (text only).
 const indexKey = (qid) => `ocrIndex:${qid}`;
 
+// Times (epoch ms) we graded submissions from the panel, per question, so "Sort: recently graded"
+// survives reload. Grade pages may not carry a timestamp; this is the source we control.
+const gradedKey = (qid) => `gradedAt:${qid}`;
+export async function loadGradedAt(qid) {
+  if (!qid) return new Map();
+  try {
+    const v = await chrome.storage.local.get(gradedKey(qid));
+    return new Map(Object.entries(v[gradedKey(qid)] || {}).filter(([, t]) => Number.isFinite(t)));
+  } catch {
+    return new Map();
+  }
+}
+export async function saveGradedAt(qid, map) {
+  if (!qid) return;
+  try {
+    await chrome.storage.local.set({ [gradedKey(qid)]: Object.fromEntries(map) });
+  } catch {}
+}
+
 export async function loadIndex(qid) {
   if (!qid) return new Map();
   try {

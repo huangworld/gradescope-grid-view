@@ -45,6 +45,10 @@ export function createRubricPanel({ grid }) {
     const sids = grid.getSelected();
     if (!sids.length) return grid.setStatus("Select at least one student first");
     panel.hidden = false;
+    // fresh form every time: a stale rubric pick / comment from the last batch is a wrong grade waiting to happen
+    chosen = new Set();
+    points.value = "";
+    comment.value = "";
     results.replaceChildren();
     title.textContent = `Grade ${sids.length} selected`;
     applyBtn.textContent = `Apply to ${sids.length} selected`;
@@ -151,8 +155,11 @@ export function createRubricPanel({ grid }) {
           grid.setBusy(sid, true);
           try {
             const ctx = await grid.ensureCtx(sid);
-            await saveGrade(ctx, payload);
-            await grid.ensureCtx(sid, { force: true }); // refresh marker + score
+            const saved = await saveGrade(ctx, payload);
+            // chip flips to "✓ score" immediately; prefer the server's score, else our projection
+            const score = typeof saved?.score === "number" ? saved.score : projectScore(ctx, chosen, payload.points ?? ctx.evaluation.points);
+            grid.markGraded(sid, { score, checked: chosen });
+            await grid.ensureCtx(sid, { force: true }); // confirm from a fresh grade page
           } catch (e) {
             fails.push({ sid, err: e.message || String(e) });
           } finally {
@@ -164,8 +171,15 @@ export function createRubricPanel({ grid }) {
       )
     );
     applyBtn.disabled = false;
+    if (!fails.length) {
+      // all saved: done with this batch → close panel, drop selection, ready for the next one
+      close();
+      grid.clearSelection();
+      grid.setStatus(`${sids.length}/${sids.length} saved`);
+      return;
+    }
     results.replaceChildren(
-      h("div", { class: fails.length ? "gsg-err" : "gsg-ok", text: `${sids.length - fails.length}/${sids.length} saved${fails.length ? `, ${fails.length} failed:` : "."}` }),
+      h("div", { class: "gsg-err", text: `${sids.length - fails.length}/${sids.length} saved, ${fails.length} failed:` }),
       ...fails.map((f) =>
         h("div", { class: "gsg-err" }, h("a", { href: grid.gradeUrlOf(f.sid), target: "_blank", rel: "noopener", text: grid.nameOf(f.sid) }), ` — ${f.err}`)
       )

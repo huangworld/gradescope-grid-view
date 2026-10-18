@@ -28,7 +28,8 @@ function absolute(url) {
 }
 
 export async function fetchGradeCtx(gradeUrl) {
-  const res = await fetch(gradeUrl, { credentials: "same-origin", headers: { Accept: "text/html" } });
+  // no-store: after a save we refetch to show the new grade; a cached copy would show the old one
+  const res = await fetch(gradeUrl, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/html" } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   if (/\/login\b/.test(new URL(res.url).pathname)) throw new Error("Not logged in");
   const html = await res.text();
@@ -82,8 +83,23 @@ function normalize(props, csrf, gradeUrl) {
     answerText: answerText(props),
     score,
     graded,
+    gradedAt: gradedAtFrom(props),
     fetchedAt: Date.now(),
   };
+}
+
+// When this question was last graded, as epoch ms, or null. The grade page's exact field is
+// unverified live, so try the plausible spots (evaluation/submission timestamps) in order.
+export function gradedAtFrom(props) {
+  const ev = props?.evaluation || props?.question_submission_evaluation || {};
+  const sub = props?.submission || {};
+  const qs = props?.question_submission || {};
+  for (const v of [ev.graded_at, ev.updated_at, qs.graded_at, qs.updated_at, sub.graded_at, sub.graded_time, sub.updated_at]) {
+    if (v == null || v === "") continue;
+    const t = typeof v === "number" ? (v < 1e12 ? v * 1000 : v) : Date.parse(v);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
 }
 
 // Typed answers of online assignments, if the grade page carries them. The

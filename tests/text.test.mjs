@@ -93,3 +93,14 @@ test("jobForPage matches ocrJobsFor keys", () => {
   const p = { id: 11, number: 1, url: "u" };
   assert.equal(jobForPage("s1", p, [{ page_number: 1, x1: 10, y1: 20, x2: 60, y2: 50 }], true).key, "s1|11|10,20,50,30");
 });
+
+test("gradedAtFrom: evaluation/submission timestamps, seconds vs ms, null when absent", async () => {
+  const { gradedAtFrom } = await import("../extension/content/gradescope.js");
+  assert.equal(gradedAtFrom({ evaluation: { updated_at: "2026-10-17T10:00:00Z" } }), Date.parse("2026-10-17T10:00:00Z"));
+  assert.equal(gradedAtFrom({ submission: { graded_at: 1760000000 } }), 1760000000000);
+  assert.equal(gradedAtFrom({ submission: { updated_at: 1760000000123 } }), 1760000000123);
+  // evaluation time wins over submission time
+  assert.equal(gradedAtFrom({ evaluation: { updated_at: "2026-01-01T00:00:00Z" }, submission: { updated_at: "2026-02-01T00:00:00Z" } }), Date.parse("2026-01-01T00:00:00Z"));
+  assert.equal(gradedAtFrom({ evaluation: { updated_at: "garbage" }, submission: {} }), null);
+  assert.equal(gradedAtFrom({}), null);
+});
