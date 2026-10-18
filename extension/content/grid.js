@@ -2,7 +2,7 @@
 import { fetchGradeCtx, makeLimiter } from "./gradescope.js";
 import { parseQuery } from "./query.js";
 import { ocrJobsFor, jobForPage, combineText, pageHits } from "./text.js";
-import { ocrPage, ocrWarm, ocrShutdown, friendlyOcrError, loadIndex, saveIndex } from "./ocr.js";
+import { ocrPage, ocrWarm, ocrShutdown, friendlyOcrError, loadIndex, saveIndex, loadGradedAt, saveGradedAt } from "./ocr.js";
 
 const FIND_HELP = [
   "Find: filter cells whose text matches.",
@@ -51,6 +51,7 @@ export function createGrid({ rows, onClose }) {
     ocrOn: false,
     ocr: new Map(), // ocr job key → {text, words} | {err}
     saved: new Map(), // sid → score we saved from the grade panel; wins over a stale refetch
+    gradedAt: new Map(), // sid → epoch ms we graded it from the panel (persisted per question)
   };
   const hitCache = new Map(); // ocr key → boxes for the current query
   const limiter = makeLimiter(5);
@@ -86,7 +87,8 @@ export function createGrid({ rows, onClose }) {
     "select",
     { class: "gsg-select", onchange: (e) => setSort(e.target.value) },
     h("option", { value: "name", text: "Sort: name" }),
-    h("option", { value: "score", text: "Sort: score" })
+    h("option", { value: "score", text: "Sort: score" }),
+    h("option", { value: "recent", text: "Sort: recently graded" })
   );
   const findBox = h("input", {
     type: "search",
@@ -213,6 +215,13 @@ export function createGrid({ rows, onClose }) {
     const ctx = state.ctx.get(sid);
     if (ctx) return ctx.score;
     return state.byId.get(sid).score;
+  }
+  // Latest known grading time: our own panel save or the grade page's timestamp (if it has one).
+  function gradedAtOf(sid) {
+    const mine = state.gradedAt.get(sid) ?? -Infinity;
+    const theirs = state.ctx.get(sid)?.gradedAt ?? -Infinity;
+    const t = Math.max(mine, theirs);
+    return t === -Infinity ? null : t;
   }
 
   async function ensureCtx(sid, { force = false } = {}) {
@@ -501,10 +510,14 @@ export function createGrid({ rows, onClose }) {
       return byGrade && matchesFind(r.sid);
     });
     const num = (s) => (s == null || s === "" ? -Infinity : parseFloat(s));
+    // recently graded: newest first → graded w/o known time → ungraded; ties by name
+    const recent = (sid) => gradedAtOf(sid) ?? (isGraded(sid) === true ? 0 : -1);
     list.sort((a, b) =>
       state.sort === "score"
         ? num(scoreOf(a.sid)) - num(scoreOf(b.sid)) || a.name.localeCompare(b.name)
-        : a.name.localeCompare(b.name)
+        : state.sort === "recent"
+          ? recent(b.sid) - recent(a.sid) || a.name.localeCompare(b.name)
+          : a.name.localeCompare(b.name)
     );
     return list;
   }
@@ -651,6 +664,7 @@ export function createGrid({ rows, onClose }) {
       if (typeof v.ocrOn === "boolean") state.ocrOn = v.ocrOn;
     } catch {}
     for (const [k, v] of await loadIndex(qid)) if (!state.ocr.has(k)) state.ocr.set(k, v);
+    for (const [sid, t] of await loadGradedAt(qid)) if (!state.gradedAt.has(sid)) state.gradedAt.set(sid, t);
     root.style.setProperty("--cell-w", `${state.cellW}px`);
     renderAll();
   }
@@ -694,6 +708,8 @@ export function createGrid({ rows, onClose }) {
     // Optimistic update right after save_grade: ungraded → graded + score chip now, refetch later confirms.
     markGraded(sid, { score, checked }) {
       state.saved.set(sid, score ?? null);
+      state.gradedAt.set(sid, Date.now());
+      saveGradedAt(qid, state.gradedAt);
       const row = state.byId.get(sid);
       if (row) (row.graded = true), (row.score = score ?? row.score);
       const ctx = state.ctx.get(sid);

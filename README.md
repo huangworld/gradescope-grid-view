@@ -90,7 +90,9 @@ reload the Gradescope page**. A stale page loses its link to the extension and b
 - `◀ ▶` / arrow keys page **every** cell at once (cells with fewer pages stay put)
 - cell size slider, remembered between visits
 - **Pages: tagged / all** switch, **Crop** (dim outside the question region, fixed-template
-  assignments), filter (all / ungraded / graded), sort (name / score)
+  assignments), filter (all / ungraded / graded), sort (name / score / recently graded — newest
+  first; times come from grades saved in this extension, persisted per question, plus any
+  timestamp the grade page exposes; graded-but-unknown-time cells follow, ungraded last)
 - **find** box: boolean query (`AND` / `OR` / `NOT`, `"phrases"`, `/regex/`, parentheses) over
   typed answers and, with **OCR: on**, locally OCR'd page text; pending cells dimmed
 - **Index pages**: OCR every page of every student once (progress bar, cancel), stored per

@@ -280,6 +280,25 @@ try {
   const re2 = await cdp.eval(pg, `JSON.stringify([__vis(), __pending().length, __status()])`);
   check("find instant after reopen (no pending)", re2.startsWith('[["102"],0,'), re2);
   check("highlights restored from persisted index", (await cdp.eval(pg, `__hits("102")`)) === 1);
+
+  // markGraded flips chip + "Sort: recently graded" orders newest first, then ungraded by name
+  const recent = await cdp.eval(pg, `(async () => {
+    __type(""); await new Promise(r => setTimeout(r, 400));
+    __grid.markGraded("103", { score: 7, checked: new Set(["1"]) });
+    await new Promise(r => setTimeout(r, 5));
+    __grid.markGraded("101", { score: 9 });
+    const sel = [...document.querySelectorAll("select.gsg-select")].find(s => [...s.options].some(o => o.value === "recent"));
+    sel.value = "recent"; sel.dispatchEvent(new Event("change"));
+    const order = [...document.querySelectorAll(".gsg-cell")].filter(c => !c.hidden).map(c => c.dataset.sid);
+    const chip = document.querySelector('.gsg-cell[data-sid="101"] .gsg-badge, .gsg-cell[data-sid="101"]').textContent;
+    const stored = (await chrome.storage.local.get("gradedAt:2"))["gradedAt:2"] || {};
+    return JSON.stringify({ order, chip: /✓\\s*9/.test(chip), graded101: __grid.state.ctx.get("101").graded, stored: Object.keys(stored).sort() });
+  })()`);
+  console.log("recent:", recent);
+  const rj = JSON.parse(recent);
+  check("sort: recently graded → 101, 103, then ungraded by name", rj.order.join(",") === "101,103,102,104,105,106", recent);
+  check("markGraded: chip shows ✓ 9 and ctx.graded true", rj.chip && rj.graded101 === true);
+  check("gradedAt persisted per question", rj.stored.join(",") === "101,103");
   await cdp.eval(pg, `__grid.destroy()`);
 
   const errs = cdp.events.filter((e) => e.method === "Runtime.exceptionThrown" || (e.method === "Log.entryAdded" && e.params.entry.level === "error")).map((e) => JSON.stringify(e.params).slice(0, 250));
