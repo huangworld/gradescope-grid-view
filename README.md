@@ -30,12 +30,16 @@ step. A **find** box filters the grid by text (typed answers, or local OCR of th
 ### 3. Grade
 
 1. Page through answers with `←` / `→` (moves every cell at once). Resize cells with the slider.
-2. Select students: click a cell (or its tick), shift-click for a range. **Clear selection** resets.
+2. Select students: click a cell (or its tick), shift-click for a range. **Select all** selects
+   every cell passing the current filter + find; **Clear selection** resets.
 3. Click **Grade selected**, tick rubric items (number keys `1`–`9` work), optionally add a point
    adjustment or comment, check the projected score, and apply. The panel opens blank every time
    (nothing carries over from the previous batch). Once every save succeeds the panel closes and the
    selection clears; if any save fails it stays open listing the failures.
 4. Or click **Open in tabs** to open the native grader for each selected student.
+   **Clear comments** blanks the comment on each selected *graded* submission, re-sending its
+   current rubric items and point adjustment so the score is unchanged. Ungraded submissions are
+   skipped (saving would grade them), as are ones with no comment.
 5. The first time, open one graded submission in the native grader to confirm the save went through.
 
 ### 4. Find
@@ -100,8 +104,9 @@ reload the Gradescope page**. A stale page loses its link to the extension and b
 - matched words highlighted on the page image (word boxes from OCR)
 - `⋯` menu: load all submissions, reset all to page 1, dump props (debug)
 - graded / ungraded marker per cell, `graded k/N` counter, filter + sort
-- multiselect (click image or tick, shift-click range) →
+- multiselect (click image or tick, shift-click range, **Select all** visible) →
   - **Open in tabs**: native grader for each selected student
+  - **Clear comments**: blank the comment on selected graded submissions, grade untouched
   - **Grade selected**: pick rubric items (+ optional point adjustment / comment), see projected
     score, apply to all selected in one click (replace semantics: unchosen items get unchecked)
 

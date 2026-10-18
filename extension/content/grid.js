@@ -153,6 +153,7 @@ export function createGrid({ rows, onClose }) {
     indexBtn,
     progress,
     h("span", { class: "gsg-sep" }),
+    h("button", { class: "gsg-btn", text: "Select all", title: "Select every cell that passes the current filter + find", onclick: () => selectVisible() }),
     h("button", { class: "gsg-btn", text: "Clear selection", onclick: () => clearSelection() }),
     actions,
     menu,
@@ -624,6 +625,16 @@ export function createGrid({ rows, onClose }) {
     for (const s of cells.keys()) renderCell(s);
     renderStatus();
   }
+  // Select exactly what is visible now (filter + find), i.e. what getSelected() would act on.
+  function selectVisible() {
+    const vis = visibleOrdered();
+    if (!vis.length) return setStatus("Nothing visible to select", true);
+    for (const r of vis) state.selected.add(r.sid);
+    state.anchor = vis[vis.length - 1].sid;
+    for (const s of cells.keys()) renderCell(s);
+    renderStatus();
+    setStatus(`Selected ${vis.length} visible`);
+  }
   function setCellW(w) {
     state.cellW = clamp(w, 200, 900);
     root.style.setProperty("--cell-w", `${state.cellW}px`);
@@ -699,6 +710,7 @@ export function createGrid({ rows, onClose }) {
     getSelected: () => visibleOrdered().map((r) => r.sid).filter((s) => state.selected.has(s)),
     getSelectedAny: () => [...state.selected],
     clearSelection,
+    selectVisible,
     nameOf: (sid) => state.byId.get(sid)?.name || `#${sid}`,
     gradeUrlOf: (sid) => state.byId.get(sid)?.gradeUrl,
     anyCtx: () => state.ctx.values().next().value || null,

@@ -1,6 +1,43 @@
 import { parseRoute, collectRows } from "./rows.js";
 import { createGrid } from "./grid.js";
 import { createRubricPanel } from "./rubric.js";
+import { clearComment, makeLimiter } from "./gradescope.js";
+
+// Blank the comment on every selected GRADED submission. Ungraded ones are skipped on purpose:
+// save_grade on them would mark them graded (full marks under negative scoring).
+async function clearComments(grid, btn) {
+  const sids = grid.getSelected();
+  if (!sids.length) return grid.setStatus("Select at least one student first", true);
+  if (!confirm(`Clear the comment on ${sids.length} selected submission${sids.length === 1 ? "" : "s"}?\nRubric items and point adjustments are kept. Ungraded ones are skipped.`)) return;
+  btn.disabled = true;
+  const limiter = makeLimiter(3);
+  let done = 0, cleared = 0, skipped = 0;
+  const fails = [];
+  grid.setStatus(`Clearing comments 0/${sids.length}…`);
+  await Promise.all(
+    sids.map((sid) =>
+      limiter(async () => {
+        grid.setBusy(sid, true);
+        try {
+          const ctx = await grid.ensureCtx(sid, { force: true }); // fresh checked items / points / comment
+          if (ctx.graded !== true || !(ctx.evaluation?.comments || "").trim()) return void skipped++;
+          await clearComment(ctx);
+          await grid.ensureCtx(sid, { force: true });
+          cleared++;
+        } catch (e) {
+          fails.push(`${grid.nameOf(sid)}: ${e.message || e}`);
+        } finally {
+          grid.setBusy(sid, false);
+          done++;
+          grid.setStatus(`Clearing comments ${done}/${sids.length}…`);
+        }
+      })
+    )
+  );
+  btn.disabled = false;
+  const tail = fails.length ? ` · ${fails.length} failed: ${fails.join("; ")}` : "";
+  grid.setStatus(`Comments cleared on ${cleared}, skipped ${skipped} (ungraded / already empty)${tail}`, fails.length > 0);
+}
 
 const route = parseRoute();
 if (route) init();
@@ -66,13 +103,18 @@ async function init() {
     gradeSel.className = "gsg-btn gsg-primary";
     gradeSel.textContent = "Grade selected";
     gradeSel.addEventListener("click", () => panel.open());
-    grid.actions.append(openTabs, gradeSel);
+    const clearCmt = document.createElement("button");
+    clearCmt.className = "gsg-btn";
+    clearCmt.textContent = "Clear comments";
+    clearCmt.title = "Blank the comment on every selected graded submission; rubric items and points stay as they are";
+    clearCmt.addEventListener("click", () => clearComments(grid, clearCmt));
+    grid.actions.append(openTabs, clearCmt, gradeSel);
     grid.actions.addEventListener("gsg:selection", (e) => {
       const n = e.detail.count;
-      openTabs.disabled = gradeSel.disabled = n === 0;
+      openTabs.disabled = gradeSel.disabled = clearCmt.disabled = n === 0;
       gradeSel.textContent = n ? `Grade selected (${n})` : "Grade selected";
     });
-    openTabs.disabled = gradeSel.disabled = true;
+    openTabs.disabled = gradeSel.disabled = clearCmt.disabled = true;
 
     document.documentElement.classList.add("gsg-active");
     document.body.append(grid.root, panel.el);
