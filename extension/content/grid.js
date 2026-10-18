@@ -678,6 +678,7 @@ export function createGrid({ rows, onClose }) {
     setStatus,
     getSelected: () => visibleOrdered().map((r) => r.sid).filter((s) => state.selected.has(s)),
     getSelectedAny: () => [...state.selected],
+    clearSelection,
     nameOf: (sid) => state.byId.get(sid)?.name || `#${sid}`,
     gradeUrlOf: (sid) => state.byId.get(sid)?.gradeUrl,
     anyCtx: () => state.ctx.values().next().value || null,

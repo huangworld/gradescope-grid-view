@@ -32,7 +32,9 @@ step. A **find** box filters the grid by text (typed answers, or local OCR of th
 1. Page through answers with `←` / `→` (moves every cell at once). Resize cells with the slider.
 2. Select students: click a cell (or its tick), shift-click for a range. **Clear selection** resets.
 3. Click **Grade selected**, tick rubric items (number keys `1`–`9` work), optionally add a point
-   adjustment or comment, check the projected score, and apply.
+   adjustment or comment, check the projected score, and apply. The panel opens blank every time
+   (nothing carries over from the previous batch). Once every save succeeds the panel closes and the
+   selection clears; if any save fails it stays open listing the failures.
 4. Or click **Open in tabs** to open the native grader for each selected student.
 5. The first time, open one graded submission in the native grader to confirm the save went through.
 
