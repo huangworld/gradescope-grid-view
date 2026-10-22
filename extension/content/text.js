@@ -47,10 +47,11 @@ export function pageHits(entry, matchers) {
 
 // → { text, status } with status ∈ "unloaded" | "pending" | "ready".
 // ocr: Map<key, {text?: string, err?: string}>; failed jobs count as done (empty text).
-export function combineText({ ctx, jobs, ocrOn, ocr }) {
+// answer=false drops the typed answer (page-scoped find: typed answers belong to no page).
+export function combineText({ ctx, jobs, ocrOn, ocr, answer = true }) {
   if (!ctx) return { text: "", status: "unloaded" };
   const parts = [];
-  if (ctx.answerText) parts.push(ctx.answerText);
+  if (answer && ctx.answerText) parts.push(ctx.answerText);
   let status = "ready";
   if (ocrOn) {
     for (const j of jobs) {

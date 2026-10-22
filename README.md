@@ -64,6 +64,13 @@ What counts as a cell's text:
   per page, results are cached while the grid is open. It reads printed/typed text; **handwriting
   is mostly missed**.
 
+**Find: all pages / this page** (button next to the box) sets the scope. *All pages* matches
+anywhere in a student's pages plus their typed answer. *This page* matches only the page each cell
+is currently showing: page everyone to, say, page 2 with `◀ ▶` first, then search. Paging while a
+find is active moves hidden cells too, so flipping to page 3 re-runs the search there; the typed
+answer is ignored in this scope for students who have pages. OCR is only requested for the pages in
+scope.
+
 Matches are **grounded on the image**: with OCR on, the words on the shown page that satisfy the
 query's positive terms (anything not under `NOT`) get a yellow box, so you can see at a glance where
 the hit is and whether OCR read it right. Boxes are stored with the index. A matching cell without
@@ -98,7 +105,8 @@ reload the Gradescope page**. A stale page loses its link to the extension and b
   first; times come from grades saved in this extension, persisted per question, plus any
   timestamp the grade page exposes; graded-but-unknown-time cells follow, ungraded last)
 - **find** box: boolean query (`AND` / `OR` / `NOT`, `"phrases"`, `/regex/`, parentheses) over
-  typed answers and, with **OCR: on**, locally OCR'd page text; pending cells dimmed
+  typed answers and, with **OCR: on**, locally OCR'd page text; pending cells dimmed; scope
+  **all pages** or only **this page** (the page each cell currently shows)
 - **Index pages**: OCR every page of every student once (progress bar, cancel), stored per
   question so later finds are instant
 - matched words highlighted on the page image (word boxes from OCR)
