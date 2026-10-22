@@ -11,6 +11,7 @@ const FIND_HELP = [
   '  "a phrase"       exact phrase    /re+gex/i        regex',
   "  ( ... )          grouping;  NOT > AND > OR",
   "Text = typed answers (online assignments) + OCR of the pages shown (OCR: on).",
+  "Find: all pages / this page = search every page of each student, or only the page each cell is on.",
   "OCR reads printed/typed text only; handwriting is mostly missed.",
 ].join("\n");
 
@@ -47,6 +48,7 @@ export function createGrid({ rows, onClose }) {
     retried: new Set(),
     query: "",
     pred: null, // compiled find predicate, or null = no find filter
+    findScope: "all", // "all" pages of each student | "page" = only the page each cell currently shows
     matchers: null, // range matchers of the query's positive terms (for highlights)
     ocrOn: false,
     ocr: new Map(), // ocr job key → {text, words} | {err}
@@ -110,6 +112,11 @@ export function createGrid({ rows, onClose }) {
       }
     },
   });
+  const scopeBtn = h("button", {
+    class: "gsg-btn",
+    title: "Find: all pages = match anywhere in a student's pages (+ typed answer).\nFind: this page = match only the page each cell is currently showing (page with ◀ ▶ first, e.g. everyone on page 2).",
+    onclick: () => setFindScope(state.findScope === "all" ? "page" : "all"),
+  });
   const ocrBtn = h("button", { class: "gsg-btn", title: "OCR the pages shown so find can match their printed/typed text (runs locally; handwriting mostly missed)", onclick: () => setOcrOn(!state.ocrOn) });
   const indexBtn = h("button", {
     class: "gsg-btn",
@@ -149,6 +156,7 @@ export function createGrid({ rows, onClose }) {
     sortSel,
     h("span", { class: "gsg-sep" }),
     findBox,
+    scopeBtn,
     ocrBtn,
     indexBtn,
     progress,
@@ -258,8 +266,37 @@ export function createGrid({ rows, onClose }) {
     const ctx = state.ctx.get(sid);
     return ctx ? ocrJobsFor(sid, pagesOf(sid), ctx.cropRects, state.crop) : [];
   }
+  // Jobs the find box reads: every page, or just the one the cell shows (findScope "page").
+  function findJobsFor(sid) {
+    if (state.findScope !== "page") return jobsFor(sid);
+    const ctx = state.ctx.get(sid);
+    const pages = pagesOf(sid);
+    if (!ctx || !pages.length) return [];
+    const idx = clamp(state.pageIdx.get(sid) ?? 0, 0, pages.length - 1);
+    return [jobForPage(sid, pages[idx], ctx.cropRects, state.crop)];
+  }
   function textOf(sid) {
-    return combineText({ ctx: state.ctx.get(sid), jobs: jobsFor(sid), ocrOn: state.ocrOn, ocr: state.ocr });
+    // page scope: typed answers belong to no page, so skip them when the student has pages
+    const answer = state.findScope !== "page" || !pagesOf(sid).length;
+    return combineText({ ctx: state.ctx.get(sid), jobs: findJobsFor(sid), ocrOn: state.ocrOn, ocr: state.ocr, answer });
+  }
+  function setFindScope(v) {
+    state.findScope = v;
+    renderScopeBtn();
+    hitCache.clear();
+    if (state.pred) queueOcr();
+    renderAll();
+  }
+  function renderScopeBtn() {
+    scopeBtn.textContent = state.findScope === "page" ? "Find: this page" : "Find: all pages";
+    scopeBtn.classList.toggle("gsg-on", state.findScope === "page");
+  }
+  // Page-scoped find depends on which page each cell shows → re-evaluate after paging.
+  function afterPageChange() {
+    if (!state.pred || state.findScope !== "page") return;
+    queueOcr();
+    applyFilter();
+    renderStatus();
   }
   // true = show. Cells whose text isn't known yet stay visible (dimmed) rather than flicker.
   function matchesFind(sid) {
@@ -327,7 +364,7 @@ export function createGrid({ rows, onClose }) {
   function queueOcr(onlySid) {
     if (!state.ocrOn || !state.pred) return;
     const sids = onlySid ? [onlySid] : [...state.ctx.keys()];
-    for (const sid of sids) for (const job of jobsFor(sid)) if (!state.ocr.has(job.key)) runOcrJob(job);
+    for (const sid of sids) for (const job of findJobsFor(sid)) if (!state.ocr.has(job.key)) runOcrJob(job);
   }
   function scheduleSave() {
     clearTimeout(saveTimer);
@@ -393,7 +430,7 @@ export function createGrid({ rows, onClose }) {
       const { text, status } = textOf(r.sid);
       if (status === "ready") (evaluated++, state.pred(text) && match++);
       else pending++;
-      if (state.ocrOn) for (const j of jobsFor(r.sid)) (ocrTotal++, state.ocr.has(j.key) && ocrDone++);
+      if (state.ocrOn) for (const j of findJobsFor(r.sid)) (ocrTotal++, state.ocr.has(j.key) && ocrDone++);
     }
     return { match, evaluated, pending, ocrDone, ocrTotal };
   }
@@ -504,11 +541,13 @@ export function createGrid({ rows, onClose }) {
     return hits;
   }
 
-  function visibleOrdered() {
+  // ignoreFind: rows passing the graded filter only (paging must also move cells find has hidden,
+  // else in page scope they never reach the page being searched)
+  function visibleOrdered({ ignoreFind = false } = {}) {
     const list = state.rows.filter((r) => {
       const g = isGraded(r.sid);
       const byGrade = state.filter === "all" || (state.filter === "graded" ? g === true : g !== true);
-      return byGrade && matchesFind(r.sid);
+      return byGrade && (ignoreFind || matchesFind(r.sid));
     });
     const num = (s) => (s == null || s === "" ? -Infinity : parseFloat(s));
     // recently graded: newest first → graded w/o known time → ungraded; ties by name
@@ -561,6 +600,7 @@ export function createGrid({ rows, onClose }) {
     cropBtn.textContent = state.crop ? "Crop: on" : "Crop: off";
     cropBtn.classList.toggle("gsg-on", state.crop);
     ocrBtn.textContent = state.ocrOn ? "OCR: on" : "OCR: off";
+    renderScopeBtn();
     ocrBtn.classList.toggle("gsg-on", state.ocrOn);
     if (findBox.value !== state.query) findBox.value = state.query;
     filterSel.value = state.filter;
@@ -582,7 +622,7 @@ export function createGrid({ rows, onClose }) {
 
   // ---------- interactions ----------
   function shiftAll(delta) {
-    for (const r of visibleOrdered()) {
+    for (const r of visibleOrdered({ ignoreFind: true })) {
       const n = pagesOf(r.sid).length;
       if (!n) continue;
       const cur = state.pageIdx.get(r.sid) ?? 0;
@@ -592,16 +632,19 @@ export function createGrid({ rows, onClose }) {
         renderCell(r.sid);
       }
     }
+    afterPageChange();
   }
   function shiftOne(sid, delta) {
     const n = pagesOf(sid).length;
     if (!n) return;
     state.pageIdx.set(sid, clamp((state.pageIdx.get(sid) ?? 0) + delta, 0, n - 1));
     renderCell(sid);
+    afterPageChange();
   }
   function resetPages() {
     state.pageIdx.clear();
     for (const sid of cells.keys()) renderCell(sid);
+    afterPageChange();
   }
   function toggleSelect(sid, shift, forceVal) {
     if (shift && state.anchor && state.anchor !== sid) {

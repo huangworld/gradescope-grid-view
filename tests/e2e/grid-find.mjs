@@ -21,6 +21,7 @@ const students = {
 };
 const ALL = '["101","102","103","104","105","106"]';
 const images = new Map();
+let multi = false; // when set, student 101 gains a 2nd page ("zebra crossing") for find-scope checks
 const srv = http.createServer((req, res) => {
   let body = [];
   req.on("data", (c) => body.push(c));
@@ -30,13 +31,16 @@ const srv = http.createServer((req, res) => {
     res.setHeader("Access-Control-Allow-Headers", "*");
     if (req.method === "OPTIONS") return res.end();
     let m;
-    if ((m = req.url.match(/^\/img\/(\d+)\.png/))) {
+    if ((m = req.url.match(/^\/img\/(\w+)\.png/))) {
       if (req.method === "PUT") (images.set(m[1], Buffer.concat(body)), res.end("ok"));
       else (res.setHeader("Content-Type", "image/png"), res.end(images.get(m[1])));
     } else if ((m = req.url.match(/^\/courses\/1\/questions\/2\/submissions\/(\d+)\/grade$/))) {
       const s = students[m[1]];
       const props = {
-        pages: [{ id: +m[1] * 10, number: 1, url: `http://127.0.0.1:${SRV}/img/${m[1]}.png` }],
+        pages: [
+          { id: +m[1] * 10, number: 1, url: `http://127.0.0.1:${SRV}/img/${m[1]}.png` },
+          ...(multi && m[1] === "101" ? [{ id: 1011, number: 2, url: `http://127.0.0.1:${SRV}/img/101b.png` }] : []),
+        ],
         question: { weight: 10 },
         submission: { score: null },
         rubric_items: [],
@@ -99,7 +103,7 @@ try {
   // 1. upload page images rendered from text
   await cdp.eval(pg, `(async () => {
     const S = ${JSON.stringify(students)};
-    for (const [sid, s] of Object.entries(S)) {
+    for (const [sid, s] of [...Object.entries(S), ["101b", { img: "zebra crossing" }]]) {
       const c = new OffscreenCanvas(1000, 300); const g = c.getContext("2d");
       g.fillStyle = "#fff"; g.fillRect(0, 0, 1000, 300); g.fillStyle = "#000"; g.font = "52px Helvetica";
       g.fillText(s.img, 40, 160);
@@ -287,6 +291,26 @@ try {
   })()`);
   check("Select all picks only visible cells", selAll === '["102"]', selAll);
   await cdp.eval(pg, `__grid.clearSelection()`);
+
+  // Find scope: all pages vs the page each cell shows. 101 gains page 2 "zebra crossing".
+  multi = true;
+  await cdp.eval(pg, `__grid.ensureCtx("101", { force: true })`);
+  const scopeBtn = `[...document.querySelectorAll(".gsg-btn")].find(b => /^Find: /.test(b.textContent))`;
+  await cdp.eval(pg, `__type("zebra")`);
+  let zebra = null;
+  for (let i = 0; i < 60 && zebra !== '["101"]'; i++) { await sleep(500); zebra = await cdp.eval(pg, `__pending().length ? "pending" : JSON.stringify(__vis())`); }
+  check("scope all: zebra on 101's page 2 matches", zebra === '["101"]', zebra);
+  await cdp.eval(pg, `${scopeBtn}.click()`); await sleep(300);
+  const sc1 = await cdp.eval(pg, `JSON.stringify([${scopeBtn}.textContent, __vis(), __pending().length])`);
+  check("scope this page (everyone on p1): zebra matches nobody", sc1 === '["Find: this page",[],0]', sc1);
+  await cdp.eval(pg, `[...document.querySelectorAll(".gsg-btn")].find(b => b.textContent === "page ▶").click()`); await sleep(300);
+  const sc2 = await cdp.eval(pg, `JSON.stringify([__vis(), __grid.state.pageIdx.get("101")])`);
+  check("page ▶ → 101 on p2 → zebra matches 101", sc2 === '[["101"],1]', sc2);
+  await cdp.eval(pg, `__type("zeta")`); await sleep(400);
+  check("scope this page: typed answer of a student with pages is excluded", (await cdp.eval(pg, `JSON.stringify(__vis())`)) === "[]");
+  await cdp.eval(pg, `${scopeBtn}.click()`); await sleep(300);
+  check("scope all: typed answer matches again", (await cdp.eval(pg, `JSON.stringify(__vis())`)) === '["103"]');
+  await cdp.eval(pg, `__type("")`); await sleep(300);
 
   // markGraded flips chip + "Sort: recently graded" orders newest first, then ungraded by name
   const recent = await cdp.eval(pg, `(async () => {
