@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Gradescope Grid Grader",
   "version": "0.2.0",
-  "description": "Grid view of every student's tagged pages for one question. Batch paging, resizable cells, multiselect, open in tabs, batch rubric apply, find (typed answers + local OCR).",
+  "description": "Grid view of every student's tagged pages for one question. Batch paging, resizable cells, multiselect, open in tabs, batch rubric apply, find (typed answers + local OCR), regrade-request review.",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "unlimitedStorage", "tabs", "offscreen"],
   "host_permissions": ["https://www.gradescope.com/*", "https://*.amazonaws.com/*"],
@@ -12,7 +12,10 @@
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
-      "matches": ["https://www.gradescope.com/courses/*/questions/*/submissions*"],
+      "matches": [
+        "https://www.gradescope.com/courses/*/questions/*/submissions*",
+        "https://www.gradescope.com/courses/*/assignments/*/regrade_requests*"
+      ],
       "js": ["content/loader.js"],
       "css": ["content/ui.css"],
       "run_at": "document_idle"

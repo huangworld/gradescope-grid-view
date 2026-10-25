@@ -1,4 +1,5 @@
 import { parseRoute, collectRows } from "./rows.js";
+import { collectRegradeRows } from "./regrades.js";
 import { createGrid } from "./grid.js";
 import { createRubricPanel } from "./rubric.js";
 import { clearComment, makeLimiter } from "./gradescope.js";
@@ -42,17 +43,26 @@ async function clearComments(grid, btn) {
 const route = parseRoute();
 if (route) init();
 
+// question page → one row per submission; regrade page → one row per request
+const collect = (route) => (route.kind === "regrade" ? collectRegradeRows(route) : collectRows(route));
+const fabLabel = (rows) => {
+  if (!rows.length) return "Grid view (0 rows found)";
+  if (route.kind !== "regrade") return `Grid view (${rows.length})`;
+  const open = rows.filter((r) => r.completed !== true).length;
+  return `Grid view (${open} open / ${rows.length} requests)`;
+};
+
 function waitForRows(timeoutMs = 6000) {
   return new Promise((resolve) => {
     const tryNow = () => {
-      const r = collectRows(route);
+      const r = collect(route);
       if (r.rows.length) return resolve(r), true;
       return false;
     };
     if (tryNow()) return;
     const mo = new MutationObserver(() => tryNow() && mo.disconnect());
     mo.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => (mo.disconnect(), resolve(collectRows(route))), timeoutMs);
+    setTimeout(() => (mo.disconnect(), resolve(collect(route))), timeoutMs);
   });
 }
 
@@ -60,8 +70,12 @@ async function init() {
   const { rows } = await waitForRows();
   const toggle = document.createElement("button");
   toggle.className = "gsg-btn gsg-fab";
-  toggle.textContent = rows.length ? `Grid view (${rows.length})` : "Grid view (0 rows found)";
-  toggle.title = rows.length ? "Open grid view of all submissions for this question" : "No submission rows found on this page; see README";
+  toggle.textContent = fabLabel(rows);
+  toggle.title = !rows.length
+    ? "No submission rows found on this page; see README"
+    : route.kind === "regrade"
+      ? "Open grid view of the regrade requests on this page (one question at a time)"
+      : "Open grid view of all submissions for this question";
   document.body.append(toggle);
 
   let grid = null;
@@ -75,8 +89,13 @@ async function init() {
   };
   toggle.addEventListener("click", () => {
     if (grid) return close();
-    const fresh = collectRows(route).rows; // re-scrape: list may have re-rendered
-    grid = createGrid({ rows: fresh.length ? fresh : rows, onClose: close });
+    const fresh = collect(route).rows; // re-scrape: list may have re-rendered
+    grid = createGrid({
+      rows: fresh.length ? fresh : rows,
+      onClose: close,
+      mode: route.kind,
+      storageKey: route.kind === "regrade" ? `regrade:${route.aid}` : route.qid,
+    });
     panel = createRubricPanel({ grid });
 
     const openTabs = document.createElement("button");

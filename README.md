@@ -4,6 +4,7 @@ A Chrome extension that shows every student's answer to one Gradescope question 
 grid, so you can scan, compare and batch-grade them instead of clicking through submissions one at
 a time. It runs in your browser on your own Gradescope login. It has **no AI/LLM** and no build
 step. A **find** box filters the grid by text (typed answers, or local OCR of the page images).
+The same grid works on an assignment's **regrade requests** list.
 
 ## Get started
 
@@ -89,6 +90,42 @@ error turns the box red and keeps the previous filter. `Esc` clears the box, a s
 it. Find stacks with the graded/ungraded filter, and the usual selection tools work on the result
 (e.g. select all matches → **Grade selected**).
 
+### 5. Regrade requests
+
+Open an assignment's regrade list: course → assignment → **Regrade Requests**, URL
+`https://www.gradescope.com/courses/<cid>/assignments/<aid>/regrade_requests`. The button reads
+**Grid view (N open / M requests)**. The grid is the same one as above, with one cell per request
+and three extra selects in the toolbar:
+
+- **Q: …** — the list mixes questions and rubrics differ per question, so the grid shows one
+  question at a time (default: first in the table). Switching questions clears the selection.
+- **Grader: all / name** — narrow to requests assigned to one grader (or *unassigned*).
+- **Open requests / All requests** — open = the Completed column is blank or pending. Completed
+  requests are hidden by default.
+
+Each cell shows the request under the page image: the student's message (yellow block for an open
+request, with its date), any staff reply, and collapsed earlier closed requests. The message is
+part of the cell's text, so **find** works on it (`"part b" OR typo`), in both find scopes.
+**Sort: request date** orders newest requests first. Below the name: grader · section.
+
+Review and regrade in batches exactly as on the question page: select cells, **Grade selected**
+(rubric replace semantics, point adjustment, comment), **Open in tabs**, **Clear comments**.
+Grade saves work; the grid flips the badge and keeps the sort/filters.
+
+**Reply & close.** Gradescope's endpoint for answering a regrade request is not known yet, so the
+panel shows a hint instead of the reply fields, and replying/closing is done in the native grader
+(**Open in tabs**). To enable it, record the call once:
+
+1. On the regrade grid, select a cell with an open request → `⋯` → **Dump props**. In the copied
+   JSON note `Object.keys(props.urls)` and the fields of `props.open_request` (an `id`? a URL?).
+2. In the native grader for that submission, open DevTools → Network (Fetch/XHR), submit a reply
+   to the request, and note the method, URL, content type and body fields of the request Gradescope
+   sends (and whether "close" is a flag on the same call).
+3. Fill in `REGRADE_RESPONSE` in `extension/content/regrade-endpoint.js` (the shape is documented
+   in the file), reload the extension. The grading panel then gains **Regrade response** +
+   **Close request after saving**; they apply only to selected submissions with an open request,
+   and a reply-only apply never touches the grade.
+
 ### Updating
 
 After `git pull`, click the reload icon on the extension card in `chrome://extensions`, **then
@@ -98,6 +135,8 @@ reload the Gradescope page**. A stale page loses its link to the extension and b
 ## Features
 
 - one cell per student showing that student's tagged pages for the question
+- **regrade requests**: the same grid on an assignment's regrade list (one cell per request,
+  question / grader / open-all selects, request text in the cell and searchable, request-date sort)
 - `◀ ▶` / arrow keys page **every** cell at once (cells with fewer pages stay put)
 - cell size slider, remembered between visits
 - **Pages: tagged / all** switch, **Crop** (dim outside the question region, fixed-template
@@ -166,7 +205,8 @@ git submodule update --init
 ## Troubleshooting
 
 - **No Grid view button.** Make sure you are on a single question's submissions page (URL ends in
-  `/questions/<qid>/submissions`) and reload the page after installing or updating.
+  `/questions/<qid>/submissions`) or an assignment's regrade list (`/assignments/<aid>/regrade_requests`),
+  and reload the page after installing or updating.
 - **Cells show too many/few pages.** Which pages are "tagged" for a question is detected
   heuristically. Try the toolbar **Pages: tagged / all** switch. To fix it, open the toolbar `⋯` menu →
   **Dump props** (logs + copies the first loaded submission's data) and adjust `pickTaggedPages`
@@ -176,6 +216,12 @@ git submodule update --init
   `extension/content/rows.js`.
 - **Broken image.** Page images are signed links that expire; a broken image is refetched once
   automatically. Reload the page if it persists.
+- **Regrade grid: names show as `#<id>`.** The regrade table on your course has no Student column,
+  and the grade page's prop holding the student name was not recognised (`studentNameFrom` in
+  `extension/content/gradescope.js`). `⋯` → **Dump props**, find the name in the JSON, add its key.
+- **Regrade grid: a completed request shows as open (or `status ?`).** The Completed cell is read
+  heuristically (`classifyCompleted` in `extension/content/regrades.js`); unreadable cells are
+  treated as open on purpose. Copy the cell's HTML from the table and extend the token lists.
 - **Find matches nothing on an online assignment.** Typed answers are pulled from the grade page
   heuristically (`answerText` in `extension/content/gradescope.js`). `⋯` → **Dump props** on a
   loaded cell and look for the answer text in the JSON; add its key to `answerText`.
@@ -194,6 +240,9 @@ git submodule update --init
 - Uses Gradescope's internal, undocumented endpoints. They can change without notice.
 - Batch grading **replaces** the rubric selection on each selected submission. Blank point
   adjustment / comment keeps each submission's existing values.
+- The regrade grid only sees requests on the current list page; if Gradescope paginates a long
+  list, later pages are not included. Replying to / closing requests needs the one-time endpoint
+  recording described above.
 
 ## Repo layout
 

@@ -10,7 +10,7 @@ const FIND_HELP = [
   "  foo OR bar       either          NOT foo / -foo   exclude",
   '  "a phrase"       exact phrase    /re+gex/i        regex',
   "  ( ... )          grouping;  NOT > AND > OR",
-  "Text = typed answers (online assignments) + OCR of the pages shown (OCR: on).",
+  "Text = typed answers (online assignments) + regrade request messages + OCR of the pages shown (OCR: on).",
   "Find: all pages / this page = search every page of each student, or only the page each cell is on.",
   "OCR reads printed/typed text only; handwriting is mostly missed.",
 ].join("\n");
@@ -30,9 +30,17 @@ const h = (tag, attrs = {}, ...kids) => {
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const fmtScore = (s) => (s == null ? "" : Number.isInteger(+s) ? String(+s) : (+s).toFixed(2).replace(/\.?0+$/, ""));
 
-export function createGrid({ rows, onClose }) {
+// mode "question": one question's submissions list. mode "regrade": an assignment's regrade
+// requests (rows carry question/grader/completed; one question shown at a time).
+// storageKey: bucket for the OCR index + graded times (defaults to the question id).
+export function createGrid({ rows, onClose, mode = "question", storageKey }) {
+  const regrade = mode === "regrade";
+  const distinct = (f) => [...new Set(rows.map(f))];
   const state = {
     rows,
+    question: regrade ? rows[0]?.question ?? null : null, // regrade: the one question shown
+    grader: "all", // regrade: grader filter
+    regradeStatus: "open", // regrade: "open" | "all"
     byId: new Map(rows.map((r) => [r.sid, r])),
     ctx: new Map(),
     errors: new Map(),
@@ -62,7 +70,7 @@ export function createGrid({ rows, onClose }) {
   let findTimer = null;
   let indexing = null; // { cancelled: bool } while "Index pages" runs
   let saveTimer = null;
-  const qid = rows[0]?.gradeUrl?.match(/\/questions\/(\d+)\//)?.[1] || null;
+  const storeKey = storageKey ?? rows[0]?.gradeUrl?.match(/\/questions\/(\d+)\//)?.[1] ?? null;
 
   // ---------- toolbar ----------
   const status = h("span", { class: "gsg-status" });
@@ -90,8 +98,33 @@ export function createGrid({ rows, onClose }) {
     { class: "gsg-select", onchange: (e) => setSort(e.target.value) },
     h("option", { value: "name", text: "Sort: name" }),
     h("option", { value: "score", text: "Sort: score" }),
-    h("option", { value: "recent", text: "Sort: recently graded" })
+    h("option", { value: "recent", text: "Sort: recently graded" }),
+    regrade ? h("option", { value: "request", text: "Sort: request date" }) : null
   );
+  // regrade mode only: which question (rubrics differ per question), whose requests, open/all
+  const questionSel = !regrade
+    ? null
+    : h(
+        "select",
+        { class: "gsg-select", title: "Question whose regrade requests are shown (one at a time: rubrics differ)", onchange: (e) => setQuestion(e.target.value) },
+        ...distinct((r) => r.question).map((q) => h("option", { value: q, text: `Q: ${q}` }))
+      );
+  const graderSel = !regrade
+    ? null
+    : h(
+        "select",
+        { class: "gsg-select", title: "Only requests assigned to this grader", onchange: (e) => setGrader(e.target.value) },
+        h("option", { value: "all", text: "Grader: all" }),
+        ...distinct((r) => r.grader).map((g) => h("option", { value: g, text: `Grader: ${g || "unassigned"}` }))
+      );
+  const statusSel = !regrade
+    ? null
+    : h(
+        "select",
+        { class: "gsg-select", title: "Open requests only, or every request incl. completed ones", onchange: (e) => setRegradeStatus(e.target.value) },
+        h("option", { value: "open", text: "Open requests" }),
+        h("option", { value: "all", text: "All requests" })
+      );
   const findBox = h("input", {
     type: "search",
     class: "gsg-select gsg-find",
@@ -152,6 +185,9 @@ export function createGrid({ rows, onClose }) {
     h("span", { class: "gsg-sep" }),
     pagesSwitch,
     cropBtn,
+    questionSel,
+    graderSel,
+    statusSel,
     filterSel,
     sortSel,
     h("span", { class: "gsg-sep" }),
@@ -190,8 +226,11 @@ export function createGrid({ rows, onClose }) {
       toggleSelect(row.sid, e.shiftKey);
     });
     const badge = h("span", { class: "gsg-badge" });
-    const name = h("a", { class: "gsg-name", href: row.gradeUrl, target: "_blank", rel: "noopener", text: row.name, title: `Open in grader (#${row.sid})` });
+    const name = h("a", { class: "gsg-name", href: row.gradeUrl, target: "_blank", rel: "noopener", text: row.name, title: `Open in grader (#${row.subId ?? row.sid})` });
     name.addEventListener("click", (e) => e.stopPropagation());
+    // regrade mode: who it's assigned to + section under the name; the request text under the image
+    const sub = regrade ? h("div", { class: "gsg-sub", title: row.question, text: `${row.grader || "unassigned"}${row.section ? ` · ${row.section}` : ""}${row.completed === true ? " · completed" : row.completed == null ? " · status ?" : ""}` }) : null;
+    const rq = regrade ? h("div", { class: "gsg-regrade", hidden: "" }) : null;
     const pageLbl = h("span", { class: "gsg-pagelbl" });
     const prev = h("button", { class: "gsg-btn gsg-mini", text: "◀", onclick: (e) => (e.stopPropagation(), shiftOne(row.sid, -1)) });
     const next = h("button", { class: "gsg-btn gsg-mini", text: "▶", onclick: (e) => (e.stopPropagation(), shiftOne(row.sid, 1)) });
@@ -202,10 +241,12 @@ export function createGrid({ rows, onClose }) {
       "div",
       { class: "gsg-cell gsg-unknown", "data-sid": row.sid },
       h("div", { class: "gsg-head" }, check, name, badge),
+      sub,
       body,
+      rq,
       h("div", { class: "gsg-foot" }, prev, pageLbl, next)
     );
-    cells.set(row.sid, { el, img, overlay, check, badge, pageLbl, prev, next, msg, body });
+    cells.set(row.sid, { el, img, overlay, check, badge, pageLbl, prev, next, msg, body, name, rq });
     io.observe(el);
   }
 
@@ -248,6 +289,13 @@ export function createGrid({ rows, onClose }) {
       }
       state.ctx.set(sid, ctx);
       if (!state.pageIdx.has(sid)) state.pageIdx.set(sid, 0);
+      const row = state.byId.get(sid);
+      if (row.nameSource === "fallback" && ctx.studentName) {
+        // list page had no Student column; the grade page knows the name
+        row.name = ctx.studentName;
+        row.nameSource = "ctx";
+        cells.get(sid).name.textContent = row.name;
+      }
       return ctx;
     } catch (e) {
       state.errors.set(sid, e.message || String(e));
@@ -321,7 +369,7 @@ export function createGrid({ rows, onClose }) {
     state.matchers = parsed?.highlight || null;
     hitCache.clear();
     if (state.pred) {
-      if (state.ctx.size + state.errors.size < state.rows.length) loadAll().catch(() => {});
+      if (scopeRows().some((r) => !state.ctx.has(r.sid) && !state.errors.has(r.sid))) loadAll().catch(() => {});
       if (state.ocrOn) queueOcr();
     }
     renderAll();
@@ -368,7 +416,7 @@ export function createGrid({ rows, onClose }) {
   }
   function scheduleSave() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveIndex(qid, state.ocr), 1500);
+    saveTimer = setTimeout(() => saveIndex(storeKey, state.ocr), 1500);
   }
 
   // ---------- index ----------
@@ -380,8 +428,9 @@ export function createGrid({ rows, onClose }) {
   }
   function indexedCount() {
     let done = 0, total = 0;
-    for (const sid of state.ctx.keys()) for (const j of jobsFor(sid)) (total++, state.ocr.has(j.key) && done++);
-    return { done, total, allLoaded: state.ctx.size + state.errors.size >= state.rows.length };
+    const scope = scopeRows();
+    for (const r of scope) if (state.ctx.has(r.sid)) for (const j of jobsFor(r.sid)) (total++, state.ocr.has(j.key) && done++);
+    return { done, total, allLoaded: scope.every((r) => state.ctx.has(r.sid) || state.errors.has(r.sid)) };
   }
   async function indexAll() {
     if (indexing) {
@@ -396,20 +445,21 @@ export function createGrid({ rows, onClose }) {
     renderAll();
     try {
       // phase 1: every submission's grade page (gives pages + typed answers)
-      const todo = state.rows.filter((r) => !state.ctx.has(r.sid));
-      let loaded = state.rows.length - todo.length;
-      setProgress(loaded, state.rows.length, "loading submissions");
+      const scope = scopeRows();
+      const todo = scope.filter((r) => !state.ctx.has(r.sid));
+      let loaded = scope.length - todo.length;
+      setProgress(loaded, scope.length, "loading submissions");
       await Promise.allSettled(
         todo.map((r) =>
           ensureCtx(r.sid)
             .catch(() => {})
-            .finally(() => setProgress(++loaded, state.rows.length, "loading submissions"))
+            .finally(() => setProgress(++loaded, scope.length, "loading submissions"))
         )
       );
       if (run.cancelled) return;
       // phase 2: OCR every page not yet indexed
       const jobs = [];
-      for (const sid of state.ctx.keys()) for (const j of jobsFor(sid)) if (!state.ocr.has(j.key)) jobs.push(j);
+      for (const r of scope) if (state.ctx.has(r.sid)) for (const j of jobsFor(r.sid)) if (!state.ocr.has(j.key)) jobs.push(j);
       const total = indexedCount().total;
       let done = total - jobs.length;
       setProgress(done, total, "indexing pages");
@@ -419,14 +469,14 @@ export function createGrid({ rows, onClose }) {
       progress.hidden = true;
       const { done, total } = indexedCount();
       const secs = Math.round((Date.now() - t0) / 1000);
-      saveIndex(qid, state.ocr);
+      saveIndex(storeKey, state.ocr);
       renderAll();
       setStatus(run.cancelled ? `Index cancelled: ${done}/${total} pages indexed` : `Indexed ${done}/${total} pages in ${secs}s`);
     }
   }
   function findStats() {
     let match = 0, evaluated = 0, pending = 0, ocrDone = 0, ocrTotal = 0;
-    for (const r of state.rows) {
+    for (const r of scopeRows()) {
       const { text, status } = textOf(r.sid);
       if (status === "ready") (evaluated++, state.pred(text) && match++);
       else pending++;
@@ -444,7 +494,7 @@ export function createGrid({ rows, onClose }) {
     });
   }
   async function loadAll() {
-    await Promise.allSettled(state.rows.map((r) => ensureCtx(r.sid)));
+    await Promise.allSettled(scopeRows().map((r) => ensureCtx(r.sid)));
   }
   function onImgError(sid) {
     if (state.retried.has(sid)) return;
@@ -466,6 +516,7 @@ export function createGrid({ rows, onClose }) {
     const row = state.byId.get(sid);
     const ctx = state.ctx.get(sid);
     const graded = isGraded(sid);
+    if (c.rq) renderRegrade(c, ctx);
     c.el.classList.toggle("gsg-graded", graded === true);
     c.el.classList.toggle("gsg-ungraded", graded === false);
     c.el.classList.toggle("gsg-unknown", graded == null);
@@ -508,6 +559,32 @@ export function createGrid({ rows, onClose }) {
     renderOverlay(c, ctx, page);
   }
 
+  // The regrade request block under the image: open request (yellow), else closed ones, else none.
+  function renderRegrade(c, ctx) {
+    const rq = c.rq;
+    rq.replaceChildren();
+    rq.hidden = !ctx;
+    c.el.classList.toggle("gsg-has-open", !!ctx?.openRequest);
+    if (!ctx) return;
+    const when = (r) => {
+      const t = Date.parse(r.created_at);
+      return Number.isFinite(t) ? new Date(t).toLocaleString() : r.created_at || "";
+    };
+    const reqEl = (r, label) =>
+      h(
+        "div",
+        { class: "gsg-regrade-req" },
+        h("div", { class: "gsg-regrade-date", text: [label, when(r)].filter(Boolean).join(" · ") }),
+        h("div", { class: "gsg-regrade-student", text: (r.student_comment || "").trim() || "(no message)" }),
+        (r.staff_comment || "").trim() ? h("div", { class: "gsg-regrade-staff", text: r.staff_comment.trim() }) : null
+      );
+    if (ctx.openRequest) rq.append(reqEl(ctx.openRequest, "open request"));
+    else if (ctx.closedRequests.length) {
+      const n = ctx.closedRequests.length;
+      rq.append(h("details", {}, h("summary", { class: "gsg-regrade-date", text: `${n} closed request${n === 1 ? "" : "s"}` }), ...ctx.closedRequests.map((r) => reqEl(r, "closed"))));
+    } else rq.append(h("div", { class: "gsg-regrade-date", text: "no regrade request" }));
+  }
+
   function renderOverlay(c, ctx, page) {
     const rects = state.crop ? ctx.cropRects.filter((r) => String(r.page_number ?? r.page) === String(page.number)) : [];
     c.overlay.replaceChildren();
@@ -543,8 +620,19 @@ export function createGrid({ rows, onClose }) {
 
   // ignoreFind: rows passing the graded filter only (paging must also move cells find has hidden,
   // else in page scope they never reach the page being searched)
+  // Regrade mode: the rows of the selected question / grader / status. Everything that counts,
+  // loads or indexes "all submissions" works on this set, not on the whole table.
+  function inScope(r) {
+    if (!regrade) return true;
+    if (r.question !== state.question) return false;
+    if (state.grader !== "all" && (r.grader || "") !== state.grader) return false;
+    return state.regradeStatus === "all" || r.completed !== true; // null (unreadable) counts as open
+  }
+  function scopeRows() {
+    return regrade ? state.rows.filter(inScope) : state.rows;
+  }
   function visibleOrdered({ ignoreFind = false } = {}) {
-    const list = state.rows.filter((r) => {
+    const list = scopeRows().filter((r) => {
       const g = isGraded(r.sid);
       const byGrade = state.filter === "all" || (state.filter === "graded" ? g === true : g !== true);
       return byGrade && (ignoreFind || matchesFind(r.sid));
@@ -552,12 +640,19 @@ export function createGrid({ rows, onClose }) {
     const num = (s) => (s == null || s === "" ? -Infinity : parseFloat(s));
     // recently graded: newest first → graded w/o known time → ungraded; ties by name
     const recent = (sid) => gradedAtOf(sid) ?? (isGraded(sid) === true ? 0 : -1);
+    // request date: newest open request first; unknown/none last
+    const reqAt = (sid) => {
+      const t = Date.parse(state.ctx.get(sid)?.openRequest?.created_at);
+      return Number.isFinite(t) ? t : -Infinity;
+    };
     list.sort((a, b) =>
       state.sort === "score"
         ? num(scoreOf(a.sid)) - num(scoreOf(b.sid)) || a.name.localeCompare(b.name)
         : state.sort === "recent"
           ? recent(b.sid) - recent(a.sid) || a.name.localeCompare(b.name)
-          : a.name.localeCompare(b.name)
+          : state.sort === "request"
+            ? reqAt(b.sid) - reqAt(a.sid) || a.name.localeCompare(b.name)
+            : a.name.localeCompare(b.name)
     );
     return list;
   }
@@ -569,11 +664,12 @@ export function createGrid({ rows, onClose }) {
     for (const r of vis) gridEl.append(cells.get(r.sid).el);
   }
   function renderStatus() {
-    const n = state.rows.length;
-    const loaded = state.ctx.size;
-    const graded = state.rows.filter((r) => isGraded(r.sid) === true).length;
-    const errs = state.errors.size;
-    let s = `loaded ${loaded}/${n}${errs ? ` (${errs} failed)` : ""} · graded ${graded}/${n} · ${state.selected.size} selected`;
+    const scope = scopeRows();
+    const n = scope.length;
+    const loaded = scope.filter((r) => state.ctx.has(r.sid)).length;
+    const graded = scope.filter((r) => isGraded(r.sid) === true).length;
+    const errs = scope.filter((r) => state.errors.has(r.sid)).length;
+    let s = `${regrade ? `${n} request${n === 1 ? "" : "s"} · ` : ""}loaded ${loaded}/${n}${errs ? ` (${errs} failed)` : ""} · graded ${graded}/${n} · ${state.selected.size} selected`;
     if (state.pred) {
       const f = findStats();
       s += ` · find ${f.match}/${f.evaluated}${f.pending ? ` (${f.pending} pending)` : ""}`;
@@ -606,6 +702,11 @@ export function createGrid({ rows, onClose }) {
     filterSel.value = state.filter;
     sortSel.value = state.sort;
     slider.value = state.cellW;
+    if (regrade) {
+      questionSel.value = state.question;
+      graderSel.value = state.grader;
+      statusSel.value = state.regradeStatus;
+    }
   }
   // Index button reflects loaded ctx + OCR cache, both of which change outside renderAll.
   function renderIndexBtn() {
@@ -704,6 +805,23 @@ export function createGrid({ rows, onClose }) {
     state.sort = v;
     applyFilter();
   }
+  // regrade mode scope. Switching question drops the selection: its rubric no longer applies.
+  function setQuestion(q) {
+    state.question = q;
+    state.selected.clear();
+    state.anchor = null;
+    renderAll();
+  }
+  function setGrader(g) {
+    state.grader = g;
+    applyFilter();
+    renderStatus();
+  }
+  function setRegradeStatus(v) {
+    state.regradeStatus = v;
+    applyFilter();
+    renderStatus();
+  }
   function persist() {
     try {
       chrome.storage.sync.set({ cellW: state.cellW, showAll: state.showAll, crop: state.crop, ocrOn: state.ocrOn });
@@ -717,8 +835,8 @@ export function createGrid({ rows, onClose }) {
       if (typeof v.crop === "boolean") state.crop = v.crop;
       if (typeof v.ocrOn === "boolean") state.ocrOn = v.ocrOn;
     } catch {}
-    for (const [k, v] of await loadIndex(qid)) if (!state.ocr.has(k)) state.ocr.set(k, v);
-    for (const [sid, t] of await loadGradedAt(qid)) if (!state.gradedAt.has(sid)) state.gradedAt.set(sid, t);
+    for (const [k, v] of await loadIndex(storeKey)) if (!state.ocr.has(k)) state.ocr.set(k, v);
+    for (const [sid, t] of await loadGradedAt(storeKey)) if (!state.gradedAt.has(sid)) state.gradedAt.set(sid, t);
     root.style.setProperty("--cell-w", `${state.cellW}px`);
     renderAll();
   }
@@ -745,6 +863,7 @@ export function createGrid({ rows, onClose }) {
     root,
     actions,
     state,
+    mode,
     limiter,
     ensureCtx,
     renderCell,
@@ -754,7 +873,7 @@ export function createGrid({ rows, onClose }) {
     getSelectedAny: () => [...state.selected],
     clearSelection,
     selectVisible,
-    nameOf: (sid) => state.byId.get(sid)?.name || `#${sid}`,
+    nameOf: (sid) => state.byId.get(sid)?.name || `#${state.byId.get(sid)?.subId ?? sid}`,
     gradeUrlOf: (sid) => state.byId.get(sid)?.gradeUrl,
     anyCtx: () => state.ctx.values().next().value || null,
     setBusy(sid, on) {
@@ -764,7 +883,7 @@ export function createGrid({ rows, onClose }) {
     markGraded(sid, { score, checked }) {
       state.saved.set(sid, score ?? null);
       state.gradedAt.set(sid, Date.now());
-      saveGradedAt(qid, state.gradedAt);
+      saveGradedAt(storeKey, state.gradedAt);
       const row = state.byId.get(sid);
       if (row) (row.graded = true), (row.score = score ?? row.score);
       const ctx = state.ctx.get(sid);
@@ -777,12 +896,25 @@ export function createGrid({ rows, onClose }) {
       renderStatus();
       applyFilter();
     },
+    // After a regrade reply that closed the request: the cell leaves "Open requests" at once.
+    markRequestClosed(sid) {
+      const row = state.byId.get(sid);
+      if (row) row.completed = true;
+      const ctx = state.ctx.get(sid);
+      if (ctx?.openRequest) {
+        ctx.closedRequests = [ctx.openRequest, ...ctx.closedRequests];
+        ctx.openRequest = null;
+      }
+      renderCell(sid);
+      applyFilter();
+      renderStatus();
+    },
     destroy() {
       document.removeEventListener("keydown", onKey);
       clearTimeout(findTimer);
       clearTimeout(saveTimer);
       if (indexing) indexing.cancelled = true;
-      saveIndex(qid, state.ocr);
+      saveIndex(storeKey, state.ocr);
       io.disconnect();
       root.remove();
       ocrShutdown(); // frees the OCR workers' memory

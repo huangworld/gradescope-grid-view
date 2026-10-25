@@ -9,6 +9,11 @@ export CHROME_BIN="$(find /tmp/cft -type f -name 'Google Chrome for Testing' | h
 scripts/fetch-vendor.sh                # once; OCR runtime
 node tests/e2e/ocr-smoke.mjs           # offscreen doc + tesseract: warm, OCR, crop, host perms, close
 node tests/e2e/grid-find.mjs           # fake grade-page server + real grid.js: find/OCR filtering end to end
+node tests/e2e/grid-regrade.mjs        # regrade-request mode: table scrape, question/grader/status selects, request text, find
 ```
+
+If Chrome dies a few seconds in with `GPU process isn't usable` / `Network service crashed`, the
+install is broken (helper binaries missing — e.g. a tmp cleaner ate them). Reinstall to a path
+outside `/tmp`, such as `~/.cache/gsg-cft`.
 
 Add `--headful` to `ocr-smoke.mjs` to watch it. Unit tests: `node --test 'tests/*.test.mjs'`.

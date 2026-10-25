@@ -166,3 +166,20 @@ html.gsg-active { overflow: hidden; }
 .gsg-results { display: flex; flex-direction: column; gap: 3px; }
 .gsg-ok { color: #116329; }
 .gsg-err { color: #a40e26; }
+
+/* regrade-request mode */
+.gsg-sub {
+  font-size: 11px; color: #57606a; padding: 0 8px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gsg-regrade {
+  font-size: 12px; padding: 6px 8px; border-top: 1px solid #eaeef2; max-height: 8.5em; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: #24292f; background: #f6f8fa;
+}
+.gsg-regrade[hidden] { display: none; }
+.gsg-cell.gsg-has-open .gsg-regrade { background: #fff8c5; }
+.gsg-regrade-req + .gsg-regrade-req { margin-top: 6px; }
+.gsg-regrade-date { color: #57606a; font-size: 11px; }
+.gsg-regrade summary { cursor: pointer; }
+.gsg-regrade-staff { margin-top: 3px; padding-left: 6px; border-left: 2px solid #d0d7de; font-style: italic; color: #57606a; }
+.gsg-reply { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed #d0d7de; border-radius: 6px; }
+.gsg-check { display: flex; align-items: center; gap: 6px; font-size: 13px; }

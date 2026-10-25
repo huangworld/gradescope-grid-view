@@ -1,5 +1,6 @@
 // Gradescope internal surface: fetch a submission's grade page, read the
 // SubmissionGrader React props, and POST grades back.
+import { REGRADE_RESPONSE } from "./regrade-endpoint.js";
 
 const MISSING_PDF = "missing_pdf";
 
@@ -84,8 +85,47 @@ function normalize(props, csrf, gradeUrl) {
     score,
     graded,
     gradedAt: gradedAtFrom(props),
+    openRequest: isReq(props.open_request) ? props.open_request : null,
+    closedRequests: Array.isArray(props.closed_requests) ? props.closed_requests.filter(isReq) : [],
+    regradeText: regradeText(props),
+    studentName: studentNameFrom(props),
+    cid: gradeUrl.match(/\/courses\/(\d+)\//)?.[1] || null,
+    qid: gradeUrl.match(/\/questions\/(\d+)\//)?.[1] || null,
+    sid: want || null,
     fetchedAt: Date.now(),
   };
+}
+
+const isReq = (r) => !!r && typeof r === "object" && !Array.isArray(r) && Object.keys(r).length > 0;
+
+// Regrade request messages on the grade page (open first, then closed; student then staff), for
+// the find box. Shape per the MCP server: {created_at, student_comment, staff_comment?}.
+export function regradeText(props) {
+  const parts = [];
+  const seen = new Set();
+  const push = (s) => {
+    const t = typeof s === "string" ? s.trim() : "";
+    if (t && !seen.has(t)) (seen.add(t), parts.push(t));
+  };
+  const reqs = [props?.open_request, ...(Array.isArray(props?.closed_requests) ? props.closed_requests : [])].filter(isReq);
+  for (const r of reqs) (push(r.student_comment), push(r.staff_comment));
+  return parts.join("\n");
+}
+
+// Student display name from grade-page props, or null. The key is unverified live (the MCP server
+// takes names from the submissions table instead), so try the plausible spots; "Dump props" shows
+// the real one if none hit.
+export function studentNameFrom(props) {
+  const sub = props?.submission || {};
+  const cands = [sub.owners?.[0], props?.owners?.[0], sub.user, sub.student, props?.student, props?.user, sub, props?.submitter];
+  for (const c of cands) {
+    if (!c || typeof c !== "object") continue;
+    const full = [c.name, c.full_name, c.display_name].find((v) => typeof v === "string" && v.trim());
+    if (full) return full.trim();
+    const fl = [c.first_name, c.last_name].filter((v) => typeof v === "string" && v.trim()).join(" ").trim();
+    if (fl) return fl;
+  }
+  return null;
 }
 
 // When this question was last graded, as epoch ms, or null. The grade page's exact field is
@@ -210,6 +250,42 @@ export function projectScore(ctx, checkedIds, pointAdj) {
   if (floor && score < 0) score = 0;
   if (ceiling && score > weight) score = weight;
   return score;
+}
+
+// Reply to / close the open regrade request on a submission. Driven entirely by
+// regrade-endpoint.js; nothing is attempted while that is null.
+export const canRespondRegrade = () => !!REGRADE_RESPONSE;
+export async function respondRegrade(ctx, { message = "", close = true } = {}) {
+  const ep = REGRADE_RESPONSE;
+  if (!ep) throw new Error("regrade response endpoint not configured (extension/content/regrade-endpoint.js)");
+  if (!ctx.openRequest) throw new Error("no open regrade request");
+  const url = ep.url(ctx, ctx.openRequest);
+  const body = ep.body(ctx, ctx.openRequest, { message, close });
+  const form = ep.contentType === "form";
+  const res = await fetch(url, {
+    method: ep.method || "POST",
+    credentials: "same-origin",
+    headers: {
+      "X-CSRF-Token": ctx.csrf,
+      "Content-Type": form ? "application/x-www-form-urlencoded" : "application/json",
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: form ? new URLSearchParams(flatten(body)).toString() : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`regrade response HTTP ${res.status}`);
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("text/html")) throw new Error("regrade response returned HTML (session expired?)");
+  return ct.includes("json") ? res.json().catch(() => ({})) : {};
+}
+// {a: {b: 1}} → {"a[b]": "1"} (Rails form encoding)
+function flatten(obj, prefix = "", out = {}) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    const key = prefix ? `${prefix}[${k}]` : k;
+    if (v && typeof v === "object" && !Array.isArray(v)) flatten(v, key, out);
+    else if (v != null) out[key] = String(v);
+  }
+  return out;
 }
 
 // Blank the comment only: re-sends the rubric items currently checked and keeps the point
