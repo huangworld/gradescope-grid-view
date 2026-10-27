@@ -40,9 +40,6 @@ async function clearComments(grid, btn) {
   grid.setStatus(`Comments cleared on ${cleared}, skipped ${skipped} (ungraded / already empty)${tail}`, fails.length > 0);
 }
 
-const route = parseRoute();
-if (route) init();
-
 // question page → one row per submission; regrade page → one row per request
 const collect = (route) => (route.kind === "regrade" ? collectRegradeRows(route) : collectRows(route));
 const fabLabel = (rows) => {
@@ -51,6 +48,9 @@ const fabLabel = (rows) => {
   const open = rows.filter((r) => r.completed !== true).length;
   return `Grid view (${open} open / ${rows.length} requests)`;
 };
+
+const route = parseRoute();
+if (route) init();
 
 function waitForRows(timeoutMs = 6000) {
   return new Promise((resolve) => {
