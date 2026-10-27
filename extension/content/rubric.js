@@ -1,5 +1,5 @@
 // Batch grading panel: pick rubric items, project the score, apply to all selected.
-import { saveGrade, projectScore, scoringType, makeLimiter } from "./gradescope.js";
+import { saveGrade, projectScore, scoringType, makeLimiter, canRespondRegrade, respondRegrade } from "./gradescope.js";
 
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -26,6 +26,23 @@ export function createRubricPanel({ grid }) {
   const results = h("div", { class: "gsg-results" });
   const title = h("h3", { class: "gsg-panel-title" });
   const applyBtn = h("button", { class: "gsg-btn gsg-primary", text: "Apply to selected", onclick: () => apply() });
+  // regrade mode: reply to / close the open request of each selected submission. Lives behind
+  // regrade-endpoint.js; until that is filled in the fields stay hidden and only a hint shows.
+  const regradeMode = grid.mode === "regrade";
+  const canReply = regradeMode && canRespondRegrade();
+  const response = h("textarea", { class: "gsg-input gsg-textarea", rows: 2, placeholder: "optional; sent to the student" });
+  const closeReq = h("input", { type: "checkbox", checked: "" });
+  const replyBox = !regradeMode
+    ? null
+    : canReply
+      ? h(
+          "div",
+          { class: "gsg-reply" },
+          h("label", { class: "gsg-field" }, h("span", { text: "Regrade response (to student)" }), response),
+          h("label", { class: "gsg-check" }, closeReq, " Close request after saving"),
+          h("div", { class: "gsg-hint", text: "Sent only to selected submissions that have an open request. Rubric/points/comment above are optional here." })
+        )
+      : h("div", { class: "gsg-hint", text: "Reply / close request: not configured yet — see README → Regrade requests → Reply & close. Grades still save; reply in the native grader (Open in tabs)." });
   const panel = h(
     "div",
     { class: "gsg-panel", hidden: "" },
@@ -34,12 +51,17 @@ export function createRubricPanel({ grid }) {
     list,
     h("label", { class: "gsg-field" }, h("span", { text: "Point adjustment" }), points),
     h("label", { class: "gsg-field" }, h("span", { text: "Comment" }), comment),
+    replyBox,
     projected,
     h("div", { class: "gsg-panel-actions" }, applyBtn),
     results
   );
   points.addEventListener("input", renderProjected);
   comment.addEventListener("input", renderProjected);
+  response.addEventListener("input", renderProjected);
+  closeReq.addEventListener("change", renderProjected);
+  const wantsGrade = () => chosen.size > 0 || points.value !== "" || comment.value.trim() !== "";
+  const wantsReply = () => canReply && (response.value.trim() !== "" || closeReq.checked);
 
   async function open() {
     const sids = grid.getSelected();
@@ -49,6 +71,8 @@ export function createRubricPanel({ grid }) {
     chosen = new Set();
     points.value = "";
     comment.value = "";
+    response.value = "";
+    closeReq.checked = true;
     results.replaceChildren();
     title.textContent = `Grade ${sids.length} selected`;
     applyBtn.textContent = `Apply to ${sids.length} selected`;
@@ -131,15 +155,18 @@ export function createRubricPanel({ grid }) {
       h("div", { class: "gsg-projected-sub", text: n ? `${n} item${n === 1 ? "" : "s"} chosen · ${sign}${fmt(sum)}${points.value !== "" ? ` · adj ${points.value}` : ""}` : "no rubric item chosen yet" })
     );
     projected.classList.toggle("gsg-projected-empty", n === 0);
-    applyBtn.disabled = n === 0 && points.value === "" && comment.value.trim() === "";
+    applyBtn.disabled = !wantsGrade() && !wantsReply();
     applyBtn.textContent = `Apply to ${grid.getSelected().length} selected`;
   }
 
   async function apply() {
     const sids = grid.getSelected();
     if (!sids.length) return;
-    if (!refCtx?.rubricItems.length) return;
-    if (sids.length > 20 && !confirm(`Apply this grade to ${sids.length} submissions?`)) return;
+    const doGrade = wantsGrade();
+    const doReply = wantsReply();
+    if (!doGrade && !doReply) return;
+    if (doGrade && !refCtx?.rubricItems.length) return;
+    if (sids.length > 20 && !confirm(`Apply this to ${sids.length} submissions?`)) return;
     applyBtn.disabled = true;
     results.replaceChildren(h("div", { class: "gsg-hint", text: `Saving 0/${sids.length}…` }));
     const payload = {
@@ -147,21 +174,35 @@ export function createRubricPanel({ grid }) {
       points: points.value === "" ? undefined : parseFloat(points.value),
       comments: comment.value.trim() === "" ? undefined : comment.value,
     };
-    let done = 0;
+    const reply = { message: response.value.trim(), close: closeReq.checked };
+    let done = 0, replied = 0, skipped = 0;
     const fails = [];
     await Promise.all(
       sids.map((sid) =>
         saveLimiter(async () => {
           grid.setBusy(sid, true);
+          let gradeSaved = false;
           try {
             const ctx = await grid.ensureCtx(sid);
-            const saved = await saveGrade(ctx, payload);
-            // chip flips to "✓ score" immediately; prefer the server's score, else our projection
-            const score = typeof saved?.score === "number" ? saved.score : projectScore(ctx, chosen, payload.points ?? ctx.evaluation.points);
-            grid.markGraded(sid, { score, checked: chosen });
+            // reply-only must not touch the grade: replace semantics would wipe the rubric
+            if (doGrade) {
+              const saved = await saveGrade(ctx, payload);
+              gradeSaved = true;
+              // chip flips to "✓ score" immediately; prefer the server's score, else our projection
+              const score = typeof saved?.score === "number" ? saved.score : projectScore(ctx, chosen, payload.points ?? ctx.evaluation.points);
+              grid.markGraded(sid, { score, checked: chosen });
+            }
+            if (doReply) {
+              if (!ctx.openRequest) skipped++;
+              else {
+                await respondRegrade(ctx, reply);
+                replied++;
+                if (reply.close) grid.markRequestClosed(sid);
+              }
+            }
             await grid.ensureCtx(sid, { force: true }); // confirm from a fresh grade page
           } catch (e) {
-            fails.push({ sid, err: e.message || String(e) });
+            fails.push({ sid, err: `${gradeSaved ? "grade saved; reply failed: " : ""}${e.message || String(e)}` });
           } finally {
             grid.setBusy(sid, false);
             done++;
@@ -171,15 +212,16 @@ export function createRubricPanel({ grid }) {
       )
     );
     applyBtn.disabled = false;
+    const summary = `${doGrade ? `${sids.length - fails.length}/${sids.length} saved` : ""}${doReply ? `${doGrade ? " · " : ""}${replied} replied${skipped ? `, ${skipped} skipped (no open request)` : ""}` : ""}`;
     if (!fails.length) {
-      // all saved: done with this batch → close panel, drop selection, ready for the next one
+      // all done: close panel, drop selection, ready for the next batch
       close();
       grid.clearSelection();
-      grid.setStatus(`${sids.length}/${sids.length} saved`);
+      grid.setStatus(summary);
       return;
     }
     results.replaceChildren(
-      h("div", { class: "gsg-err", text: `${sids.length - fails.length}/${sids.length} saved, ${fails.length} failed:` }),
+      h("div", { class: "gsg-err", text: `${summary}, ${fails.length} failed:` }),
       ...fails.map((f) =>
         h("div", { class: "gsg-err" }, h("a", { href: grid.gradeUrlOf(f.sid), target: "_blank", rel: "noopener", text: grid.nameOf(f.sid) }), ` — ${f.err}`)
       )

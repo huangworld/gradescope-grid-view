@@ -65,6 +65,9 @@ class CDP {
   async eval(sessionId, expression) { const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId); if (r.exceptionDetails) throw new Error("eval: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; }
 }
 
+// WATCHDOG: a crashed Chrome leaves CDP promises pending forever
+setTimeout(() => { console.log("E2E TIMEOUT (chrome stderr tail): " + stderr.slice(-800)); process.exit(2); }, 240000).unref();
+
 let fails = 0;
 const check = (name, cond, extra = "") => { console.log(`${cond ? "ok  " : "FAIL"} ${name}${extra ? "  " + extra : ""}`); if (!cond) fails++; };
 

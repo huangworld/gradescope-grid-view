@@ -1,8 +1,14 @@
 // Scrape the question's "Grade Submissions" list page for submission rows.
 
+// {kind:"question", cid, qid} for a question's submissions list,
+// {kind:"regrade", cid, aid} for an assignment's regrade-request list, else null.
 export function parseRoute(href = location.href) {
-  const m = new URL(href).pathname.match(/^\/courses\/(\d+)\/questions\/(\d+)\/submissions\/?$/);
-  return m ? { cid: m[1], qid: m[2] } : null;
+  const path = new URL(href).pathname;
+  let m = path.match(/^\/courses\/(\d+)\/questions\/(\d+)\/submissions\/?$/);
+  if (m) return { kind: "question", cid: m[1], qid: m[2] };
+  m = path.match(/^\/courses\/(\d+)\/assignments\/(\d+)\/regrade_requests\/?$/);
+  if (m) return { kind: "regrade", cid: m[1], aid: m[2] };
+  return null;
 }
 
 export function gradeUrlFor({ cid, qid }, sid) {
@@ -30,7 +36,7 @@ function headerIndices(table) {
   return { user: find(USER_HDR), score: find(SCORE_HDR), graded: find(GRADED_HDR) };
 }
 
-function splitUser(text) {
+export function splitUser(text) {
   // "Jane Doe jane@ucsd.edu" / "Jane Doe (jane@ucsd.edu)" → name only
   return text.replace(/[\s(]*[^\s()]+@[^\s()]+[)]?\s*$/, "").trim() || text.trim();
 }
